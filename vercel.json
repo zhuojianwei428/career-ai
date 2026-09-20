@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "functions": {
+    "api/generate.js": {
+      "runtime": "nodejs22.x",
+      "regions": ["hnd1"]
+    }
+  },
+  "headers": [
+    {
+      "source": "/assets/(css|js)/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400, immutable" }
+      ]
+    }
+  ]
+}
