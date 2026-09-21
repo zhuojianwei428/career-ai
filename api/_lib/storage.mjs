@@ -6,10 +6,20 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 
 // ---- Redis ラップ（遅延生成: 未設定時はクラッシュしない） ----
+// Vercel Marketplace の Upstash 連携は、Custom Prefix の指定によって変数名が変わる。
+//   接頭辞なし → KV_REST_API_URL / KV_REST_API_TOKEN（旧 Vercel KV 名。既定はこちら）
+//   接頭辞 UPSTASH → UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN
+// どちらでも動くよう両方を見る。READ_ONLY トークンは書き込み不可なので使わない。
 let _redis = null;
 let _redisErr = false;
+function redisUrl() {
+  return process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || "";
+}
+function redisToken() {
+  return process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || "";
+}
 export function kvReady() {
-  return !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  return !!(redisUrl() && redisToken());
 }
 async function getKV() {
   if (!kvReady()) return null;
@@ -17,10 +27,7 @@ async function getKV() {
   if (!_redis) {
     try {
       const { Redis } = await import("@upstash/redis");
-      _redis = new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN
-      });
+      _redis = new Redis({ url: redisUrl(), token: redisToken() });
     } catch (e) {
       _redisErr = true;
       return null;
