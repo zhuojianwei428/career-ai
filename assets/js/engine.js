@@ -231,8 +231,25 @@ window.CareerAI = (function () {
       return null;
     }
 
+    // ナビのログイン欄。HTML に #auth-area が無いページでも動くよう、無ければ生成する。
+    // （以前は「無ければ何もしない」実装だったため、どのページにもログインボタンが出ていなかった）
+    function ensureAuthArea() {
+      let area = document.getElementById("auth-area") || document.querySelector(".auth-area");
+      if (area) return area;
+      const inner = document.querySelector("header.nav .nav-inner") ||
+                    document.querySelector(".nav-inner") ||
+                    document.querySelector("header.nav");
+      if (!inner) return null;
+      area = document.createElement("div");
+      area.id = "auth-area";
+      area.className = "auth-area";
+      const toggle = inner.querySelector("#theme-toggle");
+      if (toggle) inner.insertBefore(area, toggle); else inner.appendChild(area);
+      return area;
+    }
+
     function renderNav() {
-      const area = document.getElementById("auth-area");
+      const area = ensureAuthArea();
       if (!area) return;
       if (state.loggedIn) {
         area.innerHTML =
