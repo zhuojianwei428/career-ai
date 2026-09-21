@@ -503,20 +503,9 @@ window.CareerAI = (function () {
     // 画面文言用：サーバが返した実際の上限値
     function limits() { return { anon: state.anonLimit, logged: state.loggedLimit, configured: state.configured }; }
 
-    // ナビに auth-area を注入（全ページ共通）
+    // ナビのログイン欄。コンテナの生成は ensureAuthArea() に一本化する
+    //（以前は init() にも同じ生成コードがあり二重管理になっていた）
     function init() {
-      const navInner = document.querySelector(".nav-inner");
-      const toggle = document.getElementById("theme-toggle");
-      if (navInner && !document.getElementById("auth-area")) {
-        const span = document.createElement("span");
-        span.id = "auth-area";
-        span.className = "auth-area";
-        if (toggle && toggle.parentNode === navInner) {
-          navInner.insertBefore(span, toggle);
-        } else {
-          navInner.appendChild(span);
-        }
-      }
       me();
     }
 
