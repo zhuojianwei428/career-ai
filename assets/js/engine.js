@@ -25,7 +25,9 @@ window.CareerAI = (function () {
 
   function toParagraphs(text) {
     const safe = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return safe
+    // 【…】プレースホルダを強調（不捏造の証拠）
+    const marked = safe.replace(/【([^】]*)】/g, '<mark class="ph">【$1】</mark>');
+    return marked
       .split(/\n{2,}/)
       .map(function (block) {
         const inner = block.replace(/\n/g, "<br>");
@@ -41,6 +43,20 @@ window.CareerAI = (function () {
     el.className = "muted" + (kind ? " status-" + kind : "");
   }
 
+  function showContextNote(data) {
+    const el = document.getElementById("ctx-note");
+    if (!el) return;
+    if (data && data.notice) {
+      el.textContent = "※ " + data.notice;
+      el.hidden = false;
+    } else if (data && data.companyContextUsed) {
+      el.textContent = "※ 公開情報から企業固有の内容を抽出しました。事実と異なればご自身で修正してください。";
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
+  }
+
   async function generate(formId, resultId, config) {
     const form = document.getElementById(formId);
     const result = document.getElementById(resultId);
@@ -54,11 +70,17 @@ window.CareerAI = (function () {
       return;
     }
 
-    const userMsg = config.buildUser(vals);
-    const messages = [
-      { role: "system", content: config.system },
-      { role: "user", content: userMsg }
-    ];
+    let payload;
+    if (config.structured) {
+      payload = { tool: config.tool || "shibou", fields: vals, model: config.model || null };
+    } else {
+      const userMsg = config.buildUser(vals);
+      const messages = [
+        { role: "system", content: config.system },
+        { role: "user", content: userMsg }
+      ];
+      payload = { messages: messages, model: config.model || null };
+    }
 
     if (btn) { btn.disabled = true; btn.dataset.label = btn.innerHTML; btn.innerHTML = '<span class="spinner"></span> 生成中…'; }
     setStatus("AI が文章を作成しています（数秒〜十数秒）");
@@ -67,7 +89,7 @@ window.CareerAI = (function () {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messages, model: config.model || null })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!res.ok || !data.text) {
@@ -76,7 +98,12 @@ window.CareerAI = (function () {
       result.innerHTML = toParagraphs(data.text.trim());
       result.classList.remove("placeholder");
       makeEditable(result);
-      if (data.mock) {
+      showContextNote(data);
+      if (data.companyContextUsed) {
+        setStatus("公開情報から抽出しました（要確認）。そのまま編集してください。", "ok");
+      } else if (data.missingExperience) {
+        setStatus("入力が足りない箇所は【 】で空缺を残しました。ご自身の言葉で埋めてください。", "warn");
+      } else if (data.mock) {
         setStatus("※デモ出力です（APIキー未設定のためテンプレート表示）。本番では実際の AI が生成されます。", "warn");
       } else {
         setStatus("生成完了。そのまま編集できます。", "ok");

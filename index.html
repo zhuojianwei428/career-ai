@@ -56,6 +56,11 @@
 
   <section class="section">
     <div class="card">
+      <div class="promise no-print" role="note">
+        <span class="check" aria-hidden="true">✓</span>
+        <span><strong>経歴を捏造しません。</strong>あなたの言葉だけで作ります。企業固有の内容は、ご入力いただいた情報からのみ記述し、足りない箇所は【 】で空缺を残します。</span>
+      </div>
+
       <form id="gen-form" class="no-print">
         <div class="field">
           <label>応募種別</label>
@@ -83,6 +88,12 @@
           <textarea data-field="経験・キーワード" placeholder="例：ゼミの研究で地域課題をフィールドワーク。貴社の〇〇事業に関心。"></textarea>
         </div>
 
+        <div class="field">
+          <label>募集要項・企業情報 <span class="hint">（URL を貼るか、テキストを貼ってください・任意）</span></label>
+          <textarea data-field="企業情報" class="mono" placeholder="例：https://www.〇〇.co.jp/recruit/  （公式採用ページや募集要項のURLを貼ると、御社の事業・技術・課題を抽出して志望動機に反映します。テキストを直接貼ってもOK）"></textarea>
+          <p class="hint sub2">※ 入力がない場合は、御社固有の内容を【 】で空缺に残します。経歴は絶対に捏造しません。</p>
+        </div>
+
         <div class="row">
           <div class="field">
             <label>文字数の目安</label>
@@ -106,6 +117,7 @@
       </form>
 
       <p id="status" class="muted" style="min-height:1.2em"></p>
+      <p id="ctx-note" class="ctx-note" hidden></p>
 
       <div class="toolbar no-print">
         <button class="btn ghost mini" onclick="CareerAI.exportPDF()">PDF出力</button>
@@ -153,15 +165,18 @@
 <script>
   CareerAI.chipGroup("scene"); CareerAI.chipGroup("len"); CareerAI.chipGroup("tone");
   var TOOL_CONFIG = {
-    required: ["応募種別", "職種", "経験・キーワード"],
-    system: "あなたは日本の採用担当者を納得させる志望動機のプロライターです。入力された応募種別・職種・企業名・経験・キーワード・文字数・トーンに基づき、具体的でオリジナリティのある志望動機を作成してください。結論ファーストとし、数字や固有名詞を使い、他社に使い回せない内容にしてください。",
+    tool: "shibou",
+    structured: true,
+    required: ["応募種別", "職種", "企業名", "経験・キーワード"],
+    system: "あなたは日本の採用担当者を納得させる志望動機のプロライターです。入力された応募種別・職種・企業名・経験・キーワード・文字数・トーン、および企業情報に基づき、具体的でオリジナリティのある志望動機を作成してください。結論ファーストとし、数字や固有名詞を使い、他社に使い回せない内容にしてください。",
     buildUser: function (v) {
       return ["応募種別: " + (v["応募種別"] || ""),
         "職種: " + (v["職種"] || ""),
         "企業名: " + (v["企業名"] || ""),
         "経験・キーワード: " + (v["経験・キーワード"] || ""),
         "文字数: " + (v["文字数"] || ""),
-        "トーン: " + (v["トーン"] || "")].join("\n");
+        "トーン: " + (v["トーン"] || ""),
+        "企業情報: " + (v["企業情報"] || "")].join("\n");
     }
   };
   document.getElementById("gen-form").addEventListener("submit", function (e) {
