@@ -1,0 +1,10 @@
+# secrets / local
+.env
+.env.local
+.env.*.local
+
+# deps
+node_modules
+
+# vercel build cache
+.vercel

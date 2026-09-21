@@ -5,10 +5,17 @@
 //   3) 企業固有の内容は取得・入力された事実のみから記述、不明は【】占位符
 //   4) 入力不足時は骨架+占位符を返し、経歴を捏造しない
 // OpenAI 互換 API を呼ぶ。環境変数 OPENAI_API_KEY が無い場合は日本語デモ(同ルール適用)。
+// 複数の無料モデルを順に試し、無料枠枯渇時は自動で次のモデルへ切替(MODEL_FALLBACK)。
 
-const BASE_URL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const BASE_URL = process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const MAX_TOKENS = 1600;
+// 無料モデル順次フォールバック（百炼の各モデルは独立して100万トークンの無料枠あり）
+// 片方の無料枠が枯渇したら自動で次のモデルへ。MODEL_FALLBACK で順序を上書き可能。
+const FALLBACK_MODELS = (process.env.MODEL_FALLBACK && process.env.MODEL_FALLBACK.trim())
+  ? process.env.MODEL_FALLBACK.split(",").map((s) => s.trim()).filter(Boolean)
+  : (process.env.OPENAI_MODEL && process.env.OPENAI_MODEL.trim() && process.env.OPENAI_MODEL !== "gpt-4o-mini")
+    ? [process.env.OPENAI_MODEL.trim()]
+    : ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen-flash"];
 
 // ---------- gBizINFO (経済産業省 法人情報 REST API v2) ----------
 // エンドポイント: https://api.info.gbiz.go.jp/hojin/v2/hojin/{法人番号}
@@ -307,6 +314,53 @@ ${ctxLine}
   };
 }
 
+// ---------- モデル順次フォールバック（無料枠枯渇時に自動切替） ----------
+// エラー分類: fatal=即失敗(認証等) / switch=次モデルへ(無料枠枯渇・レート制限・モデル不在)
+function errorAction(status, data) {
+  if (status === 401 || status === 403) return "fatal";
+  if (status === 429) return "switch";                 // レート制限 / 無料枠枯渇
+  if (status === 400) return "switch";                 // モデル不在等
+  if (status >= 500 && status < 600) return "switch";  // 一時的なサーバーエラー
+  return "fatal";
+}
+
+async function callModel(model, messages) {
+  const key = process.env.OPENAI_API_KEY;
+  const r = await fetch(BASE_URL + "/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+    body: JSON.stringify({ model: model, messages: messages, temperature: 0.8, max_tokens: MAX_TOKENS })
+  });
+  let data = {};
+  try { data = await r.json(); } catch (e) { data = {}; }
+  if (!r.ok) {
+    const action = errorAction(r.status, data);
+    const err = new Error((data && data.error && data.error.message) || ("HTTP " + r.status));
+    err.action = action;
+    err.status = r.status;
+    throw err;
+  }
+  const text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  if (!text) { const err = new Error("空の応答"); err.action = "switch"; throw err; }
+  return text;
+}
+
+// 無料モデルを順に試す。全滅(無料枠枯渇等)なら null、認証エラー等はそのまま投げる。
+async function generateWithFallback(messages) {
+  let lastErr = null;
+  for (const model of FALLBACK_MODELS) {
+    try {
+      const text = await callModel(model, messages);
+      return { text: text, model: model };
+    } catch (e) {
+      if (e.action === "fatal") throw e;
+      lastErr = e;
+      console.error("[fallback] model " + model + " failed: " + e.message + " -> next");
+    }
+  }
+  return null;
+}
+
 // ---------- ハンドラ ----------
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -335,28 +389,24 @@ export default async function handler(req, res) {
       return;
     }
     try {
-      const r = await fetch(BASE_URL + "/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer " + key
-        },
-        body: JSON.stringify({
-          model: body.model || MODEL,
-          messages: [{ role: "system", content: system }, { role: "user", content: user }],
-          temperature: 0.8,
-          max_tokens: MAX_TOKENS
-        })
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        res.status(r.status).json({ error: data.error && data.error.message ? data.error.message : "API error" });
+      const result = await generateWithFallback([
+        { role: "system", content: system },
+        { role: "user", content: user }
+      ]);
+      if (!result) {
+        // 全無料モデル枯渇: 不捏造骨架を返し、通知（サイトは停止しない）
+        const m = mock(body.tool || "shibou", f, merged);
+        m.notice = (m.notice ? m.notice + " " : "") +
+          "※すべての無料モデルの無料枠が枯渇しました。しばらく経ってから再度お試しいただくか、有料課金を有効化してください。";
+        m.freeQuotaExhausted = true;
+        m.mock = true;
+        res.status(200).json(m);
         return;
       }
-      const text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
       res.status(200).json({
-        text: text || "",
+        text: result.text,
         mock: false,
+        model: result.model,
         companyContextUsed: !!merged.text,
         contextSource: merged.source,
         missingExperience: !(f["経験・キーワード"] || "").trim(),
@@ -378,15 +428,15 @@ export default async function handler(req, res) {
     return;
   }
   try {
-    const r = await fetch(BASE_URL + "/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
-      body: JSON.stringify({ model: body.model || MODEL, messages: messages, temperature: 0.8, max_tokens: MAX_TOKENS })
-    });
-    const data = await r.json();
-    if (!r.ok) { res.status(r.status).json({ error: data.error && data.error.message ? data.error.message : "API error" }); return; }
-    const text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-    res.status(200).json({ text: text || "" });
+    const result = await generateWithFallback(messages);
+    if (!result) {
+      res.status(200).json(Object.assign(legacyMock(system, userText), {
+        notice: "※すべての無料モデルの無料枠が枯渇しました。",
+        freeQuotaExhausted: true
+      }));
+      return;
+    }
+    res.status(200).json({ text: result.text, model: result.model });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
