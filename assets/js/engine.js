@@ -83,7 +83,7 @@ window.CareerAI = (function () {
     }
 
     if (btn) { btn.disabled = true; btn.dataset.label = btn.innerHTML; btn.innerHTML = '<span class="spinner"></span> 生成中…'; }
-    setStatus("AI が文章を作成しています（数秒〜十数秒）");
+    setStatus("AI が精密に作成しています…");
 
     try {
       const res = await fetch("/api/generate", {
@@ -92,6 +92,11 @@ window.CareerAI = (function () {
         body: JSON.stringify(payload)
       });
       const data = await res.json();
+      if (res.status === 429 && data && data.limitReached) {
+        setStatus(data.error || "本日の生成上限に達しました。", "warn");
+        if (btn) { btn.disabled = true; btn.innerHTML = "本日の上限に達しました"; }
+        return;
+      }
       if (!res.ok || !data.text) {
         throw new Error(data.error || ("HTTP " + res.status));
       }
@@ -99,14 +104,15 @@ window.CareerAI = (function () {
       result.classList.remove("placeholder");
       makeEditable(result);
       showContextNote(data);
+      const rem = (data.remaining != null) ? "（本日あと " + data.remaining + " 回）" : "";
       if (data.companyContextUsed) {
-        setStatus("公開情報から抽出しました（要確認）。そのまま編集してください。", "ok");
+        setStatus("公開情報から抽出しました（要確認）。そのまま編集してください。" + rem, "ok");
       } else if (data.missingExperience) {
-        setStatus("入力が足りない箇所は【 】で空缺を残しました。ご自身の言葉で埋めてください。", "warn");
+        setStatus("入力が足りない箇所は【 】で空缺を残しました。ご自身の言葉で埋めてください。" + rem, "warn");
       } else if (data.mock) {
-        setStatus("※デモ出力です（APIキー未設定のためテンプレート表示）。本番では実際の AI が生成されます。", "warn");
+        setStatus("※デモ出力です（APIキー未設定のためテンプレート表示）。本番では実際の AI が生成されます。" + rem, "warn");
       } else {
-        setStatus("生成完了。そのまま編集できます。", "ok");
+        setStatus("生成完了。そのまま編集できます。" + rem, "ok");
       }
     } catch (e) {
       setStatus("生成に失敗しました：" + e.message, "warn");

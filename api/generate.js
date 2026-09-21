@@ -19,6 +19,24 @@ const FALLBACK_MODELS = (process.env.MODEL_FALLBACK && process.env.MODEL_FALLBAC
     ? [process.env.OPENAI_MODEL.trim()]
     : ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen-flash", "qwen3.8-flash"];
 
+// ---------- 生成回数制限（ログイン不要・1日2回/人） ----------
+// ブラウザ Cookie(clk_gen = "YYYY-MM-DD:N") で同日カウント。サーバ側で強制するため、全ツールページをまたいでも共有。
+// ※ Cookie 消去で回避可能（ログイン不要・無料という要件とのトレードオフ）。本格運用は IP 制限 / KV ストアが必要。
+const DAILY_LIMIT = 2;
+const GEN_COOKIE = "clk_gen";
+function jstDate() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+function getCookie(req, name) {
+  const c = req.headers && req.headers.cookie;
+  if (!c) return null;
+  const m = c.split(";").map(function (s) { return s.trim(); }).find(function (s) { return s.indexOf(name + "=") === 0; });
+  return m ? decodeURIComponent(m.slice(name.length + 1)) : null;
+}
+function setGenCookie(res, value) {
+  res.setHeader("Set-Cookie", GEN_COOKIE + "=" + encodeURIComponent(value) + "; Path=/; Max-Age=86400; SameSite=Lax");
+}
+
 // ---------- gBizINFO (経済産業省 法人情報 REST API v2) ----------
 // エンドポイント: https://api.info.gbiz.go.jp/hojin/v2/hojin/{法人番号}
 // 認証ヘッダ: X-hojinInfo-api-token (利用申請で取得したトークンを GBIZ_API_TOKEN に設定)
@@ -377,6 +395,26 @@ export default async function handler(req, res) {
     return;
   }
 
+  // 生成回数制限チェック（ログイン不要・1日2回）。Cookie で同日カウント、超過は 429 でブロック。
+  const todayStr = jstDate();
+  const cookieVal = getCookie(req, GEN_COOKIE);
+  let used = 0;
+  if (cookieVal) {
+    const parts = cookieVal.split(":");
+    if (parts[0] === todayStr) used = parseInt(parts[1], 10) || 0;
+  }
+  if (used >= DAILY_LIMIT) {
+    res.status(429).json({
+      error: "本日の生成回数上限（1日 " + DAILY_LIMIT + " 回）に達しました。明日またお試しください。",
+      limitReached: true,
+      remaining: 0
+    });
+    return;
+  }
+  const newUsed = used + 1;
+  setGenCookie(res, todayStr + ":" + newUsed);
+  const remaining = DAILY_LIMIT - newUsed;
+
   // 新契約: 構造化入力 + 企業情報取得（ルートA + ルートB）
   if (body && body.fields) {
     const f = body.fields;
@@ -387,7 +425,7 @@ export default async function handler(req, res) {
     const key = process.env.OPENAI_API_KEY;
     if (!key) {
       const m = mock(body.tool || "shibou", f, merged);
-      res.status(200).json(m);
+      res.status(200).json(Object.assign(m, { remaining: remaining }));
       return;
     }
     try {
@@ -402,7 +440,7 @@ export default async function handler(req, res) {
           "※すべてのモデルが一時的に利用できませんでした（無料枠枯渇・有料フォールバック qwen3.8-flash も失敗）。しばらく経ってから再度お試しください。";
         m.freeQuotaExhausted = true;
         m.mock = true;
-        res.status(200).json(m);
+        res.status(200).json(Object.assign(m, { remaining: remaining }));
         return;
       }
       res.status(200).json({
@@ -412,7 +450,8 @@ export default async function handler(req, res) {
         companyContextUsed: !!merged.text,
         contextSource: merged.source,
         missingExperience: !(f["経験・キーワード"] || "").trim(),
-        notice: merged.note
+        notice: merged.note,
+        remaining: remaining
       });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -426,7 +465,7 @@ export default async function handler(req, res) {
   const system = (messages.find((m) => m.role === "system") || {}).content || "";
   const key = process.env.OPENAI_API_KEY;
   if (!key) {
-    res.status(200).json(legacyMock(system, userText));
+    res.status(200).json(Object.assign(legacyMock(system, userText), { remaining: remaining }));
     return;
   }
   try {
@@ -434,11 +473,12 @@ export default async function handler(req, res) {
     if (!result) {
       res.status(200).json(Object.assign(legacyMock(system, userText), {
         notice: "※すべてのモデルが一時的に利用できませんでした。",
-        freeQuotaExhausted: true
+        freeQuotaExhausted: true,
+        remaining: remaining
       }));
       return;
     }
-    res.status(200).json({ text: result.text, model: result.model });
+    res.status(200).json({ text: result.text, model: result.model, remaining: remaining });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
