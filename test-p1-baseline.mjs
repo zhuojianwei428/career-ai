@@ -162,6 +162,11 @@ eq(A.res.code, 200, "A: 正常系で 200 を返す");
 ok(A.res.payload && A.res.payload.companyContextUsed === true, "A: companyContextUsed が true（P-1-2 の合格条件）");
 ok(A.res.payload && typeof A.res.payload.notice === "string" && A.res.payload.notice.length > 0,
   "A: notice が非空（P-1-2 の合格条件）");
+// notice に「どの法人に当たったか」を出す。同名の別法人に当たったとき利用者が気づけるようにするため。
+ok(/法人番号: 1180301018771/.test(A.res.payload.notice), "A: notice に当たった法人番号が出る（同名別法人の検知）");
+ok(/同名の別法人/.test(A.res.payload.notice), "A: notice が同名の別法人の可能性を警告する");
+ok(/出典：gBizINFO/.test(A.res.payload.notice), "A: notice に出典（gBizINFO）が入る（赤線#3 の要求）");
+ok(/法人名: トヨタ自動車株式会社/.test(A.res.payload.notice), "A: notice に法人名が出る");
 ok(A.res.payload && A.res.payload.contextSource === "gbiz", "A: contextSource が gbiz");
 ok(A.res.payload && A.res.payload.gbiz && A.res.payload.gbiz.ok === true, "A: 診断 ok=true");
 eq(A.res.payload && A.res.payload.gbiz && A.res.payload.gbiz.step, "done", "A: 診断 step=done");
@@ -206,12 +211,14 @@ ok(/【厳守ルール：経歴・実績・企業情報の捏造禁止】/.test(
 ok(/人のための技術/.test(gen), "実測で再現した偽スローガンを禁止例として明記している");
 ok(/「遊び」/.test(gen), "実測で再現した2例目（任天堂で出た「遊び」）も禁止例に追加されている");
 ok(/開発哲学・価値観を推測して書くこと/.test(gen), "開発哲学・価値観の推測も禁止対象に含めている");
-ok(/鉤括弧「」『』は、企業情報に入力された原文をそのまま引用する場合にのみ使う/.test(gen),
-  "鉤括弧は原文引用のみに限定する規則がある（捏造の体裁を封じる）");
+ok(/出力で鉤括弧「」『』を一切使わない/.test(gen),
+  "出力での鉤括弧を全面禁止（引用体裁の捏造を封じる。実測で残った「遊び」対策）");
+ok(/強調したい場合は括弧を使わず、地の文で書く/.test(gen), "引用符禁止の代わりに地の文で書くよう指示している");
+ok(/同名の別法人/.test(gen), "同名の別法人に当たる可能性をルールにも明記");
 ok(/ミッション・経営理念・スローガン・キャッチコピー・社風・社訓/.test(gen), "禁止対象に理念・スローガン・社風・社訓を列挙");
 ok(/業績・売上・シェア・従業員数・導入技術などの数値も、企業情報に無い限り書かない/.test(gen), "数値の捏造も禁止");
 ok(/プレースホルダのまま残す/.test(gen), "情報が無い箇所はプレースホルダで残すと明記");
-ok(/自己申告の文字数を書かない/.test(gen), "文字数の自己申告を禁止（実測 698字 vs 実際579字 の食い違い対策）");
+ok(/文字数の自己申告/.test(gen) && /を書かない/.test(gen), "文字数の自己申告を禁止（実測 698字 vs 実際579字 の食い違い対策）");
 // 両方の契約に前置されていること（片方だけだとツールによって捏造の有無が変わる）
 ok(/const NO_FABRICATION_RULES =\s*\n`/.test(gen), "ルールが定数として1か所に定義されている");
 ok(/\$\{NO_FABRICATION_RULES\}/.test(gen), "構造化契約(buildPrompt)がルールを前置している");
