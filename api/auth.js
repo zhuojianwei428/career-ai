@@ -71,7 +71,11 @@ export default async function handler(req, res) {
     }
     const { salt, hash } = hashPassword(password);
     const code = newCode();
-    await storePendingVerification(email, code, salt, hash);
+    const stored = await storePendingVerification(email, code, salt, hash);
+    if (!stored) {
+      // 保存できていないコードをメールで送ると、入力しても必ず失敗する（＝行き止まり）
+      return json(res, 503, { error: "認証ストアに接続できませんでした。しばらく経ってから再度お試しください。" });
+    }
     const ok = await sendVerificationEmail(email, code);
     if (!ok) {
       await delPendingVerification(email);

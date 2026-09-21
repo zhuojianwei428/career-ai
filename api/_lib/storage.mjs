@@ -5,7 +5,43 @@
 
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 
-// ---- Redis ラップ（遅延生成: 未設定時はクラッシュしない） ----
+// ---- Redis ラップ（遅延生成: 未設定時も障害時もクラッシュしない） ----
+// 障害時の降級方針:
+//   Redis が落ちても 500 を返さない。全メソッドが null を返すので、呼び出し側は
+//   「未設定のとき」と同じ経路に自然に落ちる（＝セッション解決できず匿名扱い＝Cookie の2回/日）。
+//   一定時間は呼び出しを止めるサーキットブレーカー付き（復旧は自動。恒久無効化はしない）。
+const DOWN_MS = Number(process.env.KV_DOWN_MS) || 30000; // 障害検知後、この時間だけ Redis を叩かない（テストで短縮可）
+let _downUntil = 0;
+let _downLogged = false;
+function redisDown() { return Date.now() < _downUntil; }
+function markDown(e) {
+  _downUntil = Date.now() + DOWN_MS;
+  if (!_downLogged) {
+    _downLogged = true;
+    console.warn("[storage] Redis 障害を検知 → " + (DOWN_MS / 1000) + "秒間は降級動作（匿名扱い）。原因: " + ((e && e.message) || e));
+  }
+}
+// 例外を投げずに null を返すプロキシ。既存の呼び出し側はすべて null を許容している
+// （未設定時に `if (!kv) return null/false/0` で戻る設計のため）。
+function safeRedis(instance) {
+  return new Proxy(instance, {
+    get(target, prop) {
+      const v = Reflect.get(target, prop, target);
+      if (typeof v !== "function") return v;
+      return async function (...args) {
+        if (redisDown()) return null;
+        try {
+          const r = await v.apply(target, args);
+          _downLogged = false; // 成功したらログ抑止を解除
+          return r;
+        } catch (e) {
+          markDown(e);
+          return null;
+        }
+      };
+    }
+  });
+}
 // Vercel Marketplace の Upstash 連携は、Custom Prefix の指定によって変数名が変わる。
 //   接頭辞なし → KV_REST_API_URL / KV_REST_API_TOKEN（旧 Vercel KV 名。既定はこちら）
 //   接頭辞 UPSTASH → UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN
@@ -21,13 +57,15 @@ function redisToken() {
 export function kvReady() {
   return !!(redisUrl() && redisToken());
 }
+// サーキットブレーカーが開いているか（ログ用・テスト用）
+export function kvDegraded() { return redisDown(); }
 async function getKV() {
   if (!kvReady()) return null;
   if (_redisErr) return null;
   if (!_redis) {
     try {
       const { Redis } = await import("@upstash/redis");
-      _redis = new Redis({ url: redisUrl(), token: redisToken() });
+      _redis = safeRedis(new Redis({ url: redisUrl(), token: redisToken() }));
     } catch (e) {
       _redisErr = true;
       return null;
@@ -75,7 +113,9 @@ export async function createSession(userId) {
   const kv = await getKV();
   if (!kv) return null;
   const token = newToken();
-  await kv.set("session:" + token, userId, { ex: 60 * 60 * 24 * 30 });
+  // 降級時は set が null を返す。使えないセッション Cookie を配らないよう失敗として扱う。
+  const r = await kv.set("session:" + token, userId, { ex: 60 * 60 * 24 * 30 });
+  if (r === null || r === undefined) return null;
   return token;
 }
 export async function destroySession(token) {
@@ -129,8 +169,10 @@ export async function storePendingVerification(email, code, salt, hash) {
   const kv = await getKV();
   if (!kv) return false;
   const key = "verify:" + email.toLowerCase().trim();
-  await kv.set(key, JSON.stringify({ code: String(code), salt, hash, exp: Date.now() + 600000 }), { ex: 600 });
-  return true;
+  // 降級時（Redis 障害）は set が null を返す。ここで false を返さないと
+  // 「保存できていないコード」をメールで送ってしまい、ユーザーが入力しても必ず失敗する。
+  const r = await kv.set(key, JSON.stringify({ code: String(code), salt, hash, exp: Date.now() + 600000 }), { ex: 600 });
+  return r !== null && r !== undefined;
 }
 export async function getPendingVerification(email) {
   const kv = await getKV();
@@ -174,7 +216,8 @@ export async function saveRecord(userId, rec) {
   const kv = await getKV();
   if (!kv) return false;
   const key = "records:" + userId;
-  await kv.rpush(key, JSON.stringify(Object.assign({ ts: Date.now() }, rec)));
+  const r = await kv.rpush(key, JSON.stringify(Object.assign({ ts: Date.now() }, rec)));
+  if (r === null || r === undefined) return false; // 降級時は「保存できていない」
   await kv.expire(key, 60 * 60 * 24 * 365);
   const len = await kv.llen(key); // 最新 200 件に抑える
   if (len > 200) await kv.ltrim(key, len - 200, -1);
@@ -201,6 +244,6 @@ export async function incDailyUsage(userId, dateKey) {
   if (!kv) return 0;
   const key = "usage:" + userId + ":" + dateKey;
   const n = (Number(await kv.get(key)) || 0) + 1;
-  await kv.set(key, n, { ex: 60 * 60 * 48 });
-  return n;
+  const r = await kv.set(key, n, { ex: 60 * 60 * 48 });
+  return (r === null || r === undefined) ? 0 : n; // 降級時は 0（記録できていない）
 }
