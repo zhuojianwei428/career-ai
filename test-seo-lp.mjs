@@ -157,6 +157,19 @@ ok(
   /function init\(\) \{[\s\S]{0,400}?ensureAuthArea\(\);\s*\n\s*me\(\);/.test(engine),
   "init() が fetch を待たずに auth-area の器を同期的に作る"
 );
+// それでも nav は HTML の時点で一度描画されるため、器が HTML に無いと
+// 「初回描画 → スクリプトが挿入」の間で nav のリンク列がずれる（実測 632→446、186px）。
+// 6 ページすべてが器を HTML に持つことを固定する。
+for (const p of PAGES.concat(NOINDEX_PAGES)) {
+  ok(
+    /<span class="auth-area" id="auth-area"><\/span>/.test(read(p)),
+    p + ": auth-area の器を HTML に持つ（JS 挿入による初回描画のずれを防ぐ）"
+  );
+  ok(
+    read(p).indexOf('<span class="auth-area" id="auth-area"></span>') < read(p).indexOf('id="theme-toggle"'),
+    p + ": 器が theme-toggle より前に置かれている（ログイン欄は左、テーマ切替は右）"
+  );
+}
 // 幅予約は狭い画面では解除する。予約したまま行を占有させると
 // 折り返すナビが 1 段増えて、モバイルの常時ナビ高さが 188px→236px に膨らむ（実測）。
 ok(

@@ -316,8 +316,9 @@ window.CareerAI = (function () {
       return null;
     }
 
-    // ナビのログイン欄。HTML に #auth-area が無いページでも動くよう、無ければ生成する。
-    // （以前は「無ければ何もしない」実装だったため、どのページにもログインボタンが出ていなかった）
+    // ナビのログイン欄。器は各 HTML に <span class="auth-area" id="auth-area"> として
+    // 置いてある（JS で挿入すると初回描画との間でナビがずれるため）。
+    // ここは「HTML に無いページでも動く」ための保険として生成も担う。
     function ensureAuthArea() {
       let area = document.getElementById("auth-area") || document.querySelector(".auth-area");
       if (area) return area;
