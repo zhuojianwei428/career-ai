@@ -147,6 +147,23 @@ console.log(await r.json());   // { configured, ok, action:"search", candidates:
 > `/api/company` 側は `[company][search]` / `[company][detail]` / `[company][SKIP]` /
 > `[company][LIMIT]` の 4 種類で、**どれも 500 を返しません**。
 
+#### `gbiz.diag` の読み方
+
+| フィールド | 意味 |
+|---|---|
+| `configured` | `GBIZ_API_TOKEN` が設定されているか |
+| `ok` | **上流から実データが取れたか**（`search-done` / `done` で true） |
+| `step` | どこで止まったか（上の表） |
+| `status` | 上流 HTTP ステータス |
+| `error` | 失敗の理由（`http-401` 等）。正常系では null |
+| `hits` | 検索で返ってきた候補数 |
+
+> 2026-09-21 に修正：`gbizSearch()` が成功時に `ok` を立てておらず、
+> `hits:81` / `step:"search-done"` なのに `diag.ok:false` という**自己矛盾した診断**を
+> 返していました（`gbizDetail()` 側は立てていた）。ログを見た人が誤診するので意味を統一。
+> **`search-empty` は「正常だがデータ無し」なので `ok:false` のまま**です
+> （ここを true にすると今度は「データが取れた」と誤読されます）。
+
 ### 既知の落とし穴（修正済み）
 
 - **検索 URL の末尾スラッシュ**：`/hojin/v2/hojin/?name=…` はルートに一致せず
@@ -166,5 +183,5 @@ console.log(await r.json());   // { configured, ok, action:"search", candidates:
 | スクリプト | 内容 |
 |---|---|
 | `node test-p1-baseline.mjs` | gBizINFO の URL 組み立て・失敗の可観測性・捏造禁止規則の前置・自己申告字数の除去・截断検知。fetch を横取りして**実際にハンドラを走らせる**。スタブは実測した壊れ方（末尾スラッシュ→500）を再現するので、同じ改修をすると落ちます。**177 項目** |
-| `node test-p0.mjs` | P0-0 の候補確認フロー（search/detail/未設定 200/短名 400/GET 405/不正な法人番号で **fetch 0 回**/実レート制限 429）、H1・Title・構造化データ、占位符の短ラベル化、去歧義、字数、モバイル、信任表示。**207 項目** |
+| `node test-p0.mjs` | P0-0 の候補確認フロー（search/detail/未設定 200/短名 400/GET 405/不正な法人番号で **fetch 0 回**/実レート制限 429）、H1・Title・構造化データ、占位符の短ラベル化、去歧義、字数、モバイル、信任表示。**212 項目** |
 

@@ -68,6 +68,12 @@ async function gbizGet(path) {
   }
 }
 
+// 診断オブジェクト。意味を固定する:
+//   ok    = 上流（gBizINFO）から**実データが取れた**か。search-empty は「正常だがデータ無し」なので false。
+//   step  = どこで止まったか（no-token / search / search-empty / search-done / detail / detail-empty / …）
+// 実測 2026-09-21: gbizSearch が成功時に ok を立てておらず、hits:81 / step:"search-done" なのに
+// diag.ok:false という**自己矛盾した診断**を返していた（detail 側は立てていた）。
+// ログを見て誤診する原因になるので、両関数で同じ意味になるよう統一した。
 function emptyDiag(step) {
   return { configured: !!gbizToken(), ok: false, step: step || "init", status: null, error: null, hits: 0 };
 }
@@ -95,6 +101,7 @@ export async function gbizSearch(name) {
   }
   diag.hits = search.data.length;
   diag.step = "search-done";
+  diag.ok = true;   // 上流から候補が取れた（search-empty と混同しないよう必ず立てる）
   const norm = function (x) {
     return {
       corporateNumber: x && x.corporate_number ? String(x.corporate_number) : null,

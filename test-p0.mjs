@@ -121,6 +121,11 @@ eq(S.res.payload.candidates[2].status, "2", "P0-0: 登記閉鎖等の状態も�
 ok(typeof S.logs.find((l) => l.indexOf("[company][search]") >= 0) === "string",
   "P0-0: 検索結果が必ずログに残る");
 ok(calls.every((u) => !/\/hojin\/v2\/hojin\/\?/.test(u)), "P0-0: 末尾スラッシュ形式を使っていない");
+// 本番で実測した自己矛盾: search が成功しているのに diag.ok が false だった（detail 側は true）。
+// 「hits はあるのに ok:false」はログを見た人を誤診させるので、意味を統一して固定する。
+eq(S.res.payload.diag.step, "search-done", "P0-0: 検索成功時は step=search-done");
+eq(S.res.payload.diag.ok, true, "P0-0: 実データが取れたら diag.ok=true（detail 側と意味を揃える）");
+ok(S.res.payload.diag.hits > 0, "P0-0: 取得件数を diag.hits に残す");
 
 // 候補ゼロ（個人事業主など）は正常系
 const S0 = await withFetch("empty", async () => {
@@ -131,6 +136,10 @@ eq(S0.res.code, 200, "P0-0: 該当なしでも 200");
 eq(S0.res.payload.candidates, [], "P0-0: 候補ゼロを返す");
 ok(/見つかりませんでした/.test(S0.res.payload.message), "P0-0: 「見つからなかった」ことを正直に伝える");
 ok(!S0.errs.some((l) => l.indexOf("[gbiz][FAIL]") >= 0), "P0-0: 該当なしは FAIL ログにしない（異常ではない）");
+// 「正常だがデータ無し」は diag.ok=false のまま。ここを true にすると、今度は逆に
+// 「データが取れた」と誤読される。search-done と search-empty を区別できることが要点。
+eq(S0.res.payload.diag.step, "search-empty", "P0-0: 該当なしは step=search-empty");
+eq(S0.res.payload.diag.ok, false, "P0-0: 該当なしは diag.ok=false（データは取れていない）");
 
 // 上流 401 でも 500 を返さない
 const SB = await withFetch("bad", async () => {

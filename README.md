@@ -107,16 +107,17 @@ npx serve .        # または python -m http.server
 - ⚠️ **2026-09-21 に修正した重大バグ**：検索 URL を `GBIZ_BASE + "/?name=…"`（**末尾スラッシュ付き**）にしていたため、ルートに一致せず**トークンが正しくても必ず HTTP 500** が返り、`companyContextUsed` が常に false だった。しかも失敗がログに出ず無言で `null` を返す実装だったため、**機能が全滅していても誰も気づけない**状態が続いていた。正しい形は `GBIZ_BASE + "?name=…"`。
   - 切り分け方：**401=ルート有り（認証層に到達）/ 500=ルート未マッチ**。存在しないダミールート `/zzz` が 500 を返すのと同じ挙動になるので、パスの誤りはこれで一発で判る。curl で試すと Windows の schannel が TLS 再ネゴシエーションで本文を取りこぼすため、**Node の fetch で確認する**こと。
 - **失敗を必ず観測できる形にした**：`gbizGet()` は `{ok, status, error, data}` を返し、失敗時は `console.error("[gbiz][FAIL] …")` に URL と上流ステータスを残す。リクエストごとに `console.log("[gbiz] {…}")` を出し、レスポンスにも `gbiz`（`{configured, ok, step, status, error, hits, corporateNumber}`）を載せるので、**本番に 1 リクエストで現在の状態を確認できる**。異常ではないケース（法人データに該当なし＝`search-empty`、トークン未設定＝`no-token`、未確認＝`no-confirmation`）は FAIL ログにしない。`/api/company` 側も `[company][search]` / `[company][detail]` / `[company][SKIP]` / `[company][LIMIT]` を出し、**どれも 500 を返さない**。
+  - `diag.ok` の意味は**「上流から実データが取れたか」**に統一してある（`search-done` / `done` で true、`search-empty` は false）。本番実測で `hits:81` かつ `step:"search-done"` なのに `ok:false` を返す**自己矛盾した診断**が出ていたので直した——**診断が嘘をつくと、P-1 で作った「失敗の可観測化」自体が無意味になる**。この意味の揺れはテストで固定している。
 - **捏造禁止ルール**：`api/generate.js` の `NO_FABRICATION_RULES` に一本化し、**構造化契約（`buildPrompt`）と旧契約（`messages`）の両方に前置**する。片方だけだとツールによって捏造の有無が変わる（実際 `index.html` 以外の 4 ツールは旧契約を通っており、この規則が一切効いていなかった）。特に「企業のミッション・理念・スローガンを `「」` 付きで引用しない」「企業情報に無い数値を書かない」「文字数を自己申告しない」を明文化している（プロンプトに書いただけでは足りないので、実測で検証する）。
   - 実測で効いた順は **「引用符を禁じる」＞「"捏造するな"と書く」**。企業の理念の捏造は、**`「」` で括って"会社がそう言った"体裁にする**ことで初めて成立するからで、`「」``『』` を禁じると捏造の**文体そのもの**が書けなくなる。
   - **規則は必ず出力フォーマットの直前に置く**（プロンプト先頭に置いただけでは弱い）。旧契約（`messages`）では `NO_FABRICATION_RULES` が `content` の先頭に来るよう組み立てている。
 - **出力の完全性**：`finish_reason === "length"` を検知して `truncated: true` を返し、`notice` にも「文が途中で切れた可能性（出力上限）」を出してログ `[gen][FAIL]` に残す。`MAX_TOKENS` は reasoning モデルの思考分も同じ枠を食うため **1600 → 3000** に拡大した（1600 では「長め 500〜800字」指定時に切れる）。
-- 回帰テスト：`node test-p1-baseline.mjs`（**177 項目**・ネットワーク不要）。gBizINFO のスタブが**実測した壊れ方（末尾スラッシュ＝500）を再現する**ので、同じ改修をするとテストが落ちる。ハンドラを実際に走らせて `companyContextUsed`・`notice`・`gbiz` の診断値まで確認する。`node test-p0.mjs`（**207 項目**）は確認フロー・不正な法人番号で fetch 0 回・実レート制限・文案・去歧義・字数・モバイルまで見る。
+- 回帰テスト：`node test-p1-baseline.mjs`（**177 項目**・ネットワーク不要）。gBizINFO のスタブが**実測した壊れ方（末尾スラッシュ＝500）を再現する**ので、同じ改修をするとテストが落ちる。ハンドラを実際に走らせて `companyContextUsed`・`notice`・`gbiz` の診断値まで確認する。`node test-p0.mjs`（**212 項目**）は確認フロー・不正な法人番号で fetch 0 回・実レート制限・文案・去歧義・字数・モバイルまで見る。
 
 ## 回帰テスト一覧（すべてネットワーク不要）
 
 ```
-node test-p0.mjs              207 項目  P0-0 確認フロー / 文案 / 占位符 / 字数 / モバイル
+node test-p0.mjs              212 項目  P0-0 確認フロー / 文案 / 占位符 / 字数 / モバイル
 node test-p1-baseline.mjs     177 項目  gBizINFO の URL・失敗の可観測性 / 捏造禁止規則 / 截断
 node test-seo-lp.mjs          133 項目  sitemap・robots・構造化データと可視 FAQ の一致 / EXAMPLE キー
 node test-auth-e2e.mjs         42 項目  登録→認証→ログイン→上限→履歴（fake Redis + fake Resend）
