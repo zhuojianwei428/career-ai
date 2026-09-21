@@ -21,7 +21,7 @@ career-ai/
 - 編集：結果は `contenteditable` でその場で書き換え（履歴書の氏名等も編集可能）
 - 写真：履歴書・職務経歴書は写真枠を用意。アップロードでプレビュー
 - 出力：ブラウザ印刷で A4/PDF（依存ゼロ）、および .txt 出力
-- 制限：匿名は**1日2回/人**（Cookie で同日カウント、サーバ側強制）。**ログイン中は1日10回**（Redis でカウント・全デバイス共有）。超過は `429` を返しフロントでボタンを無効化。単体テストは `test-ratelimit.mjs`
+- 制限：匿名は**1日2回/人**（Cookie で同日カウント、サーバ側強制）。**ログイン中は1日5回**（Redis でカウント・全デバイス共有、`LOGGED_DAILY_LIMIT` で変更可）。超過は `429` を返しフロントでボタンを無効化。単体テストは `test-ratelimit.mjs`
 
 ## ローカル確認
 ```
@@ -48,11 +48,15 @@ npx serve .        # または python -m http.server
 ※ 国内站は実名認証（中国身份证）必須。各モデルの無料枠残量は百炼コンソール「リソースパック」で確認。
 
 ## ログイン・マイページ（生成履歴）
-- 右上に「ログイン」ボタン（全ページ共通）。メール＋パスワードで**新規登録/ログイン**（パスワードは scrypt ハッシュ保存）。
+- 右上に「ログイン」ボタン（全ページ共通）。**新規登録は実在メール必須**：`noreply@coverletterkit.com` から届く**6桁の認証コード**（10分有効）を入力して初めてアカウントが確定します。パスワードは scrypt + ソルトでハッシュ保存。
+- 総当たり対策：コード誤入力は5回まで（超過で保留データ破棄→再登録）。再送信は10分あたり5回まで。
 - ログイン中は生成履歴が **Redis** に保存され、`/account.html`（マイページ）でいつでも確認可能。
-- ログイン中は1日生成上限が2回→10回にアップ。
-- ストア未設定時はログイン機能は無効、匿名の「1日2回」のまま動作。
-- ストア用意手順は **[REDIS_SETUP.md](./REDIS_SETUP.md)**。バックエンド：`api/auth.js`（登録/ログイン/ログアウト/状態）、`api/records.js`（履歴保存/取得）、`api/_lib/storage.mjs`（Redis ラップ＋ハッシュ）。フロント：`assets/js/engine.js` の `Auth` モジュール。
+- ログイン中は1日生成上限が2回→**5回**にアップ。
+- ストア／メール未設定時はログイン機能は無効、匿名の「1日2回」のまま動作。
+- 用意手順：ストア（Redis）は **[REDIS_SETUP.md](./REDIS_SETUP.md)**、メール送信（Resend）は **[EMAIL_SETUP.md](./EMAIL_SETUP.md)**。
+- バックエンド：`api/auth.js`（登録/メール認証/再送/ログイン/ログアウト/状態）、`api/records.js`（履歴保存/取得）、`api/_lib/storage.mjs`（Redis ラップ＋ハッシュ）、`api/_lib/email.mjs`（認証メール送信）。フロント：`assets/js/engine.js` の `Auth` モジュール。
+- 環境変数：`RESEND_API_KEY` / `RESEND_FROM`（既定 `noreply@coverletterkit.com`）/ `RESEND_REPLY_TO`（既定 `contact@coverletterkit.com`）/ `LOGGED_DAILY_LIMIT`（既定 5）。
+- 認証まわりの E2E テスト：`test-auth-e2e.mjs`（フェイク Redis + フェイク Resend で登録→認証→ログイン→上限→履歴まで通す）
 
 ## 次の拡張（クラスタ深化）
 - 各ツールの「職種別」サブページ（例：`/shinsotsu/eigyo.html`）で長尾を取りに行く

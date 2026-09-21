@@ -82,10 +82,22 @@
     } catch (e) { me = { loggedIn: false }; }
 
     if (!me.loggedIn) {
+      if (me.configured === false) {
+        view.innerHTML =
+          '<p class="warn">現在ログイン機能を準備中です。ご利用いただけるまで今しばらくお待ちください。</p>' +
+          '<p class="muted">ログインなしでも、各ツールは本日最大2回まで生成できます。</p>' +
+          '<p><a class="btn block" href="/">ツールへ戻る</a></p>';
+        return;
+      }
+      var lim = (window.CareerAI && CareerAI.auth && CareerAI.auth.limits) ? CareerAI.auth.limits() : { anon: 2, logged: 5 };
+      var mailNote = (me.emailConfigured === false)
+        ? '<p class="warn">現在メール送信が未設定のため、新規登録は利用できません（管理者へ連絡）。</p>'
+        : '';
       view.innerHTML =
+        mailNote +
         '<div class="promise no-print" role="note"><span class="check" aria-hidden="true">✓</span>' +
         '<span>生成履歴を保存・確認するにはログインしてください。</span></div>' +
-        '<p class="muted">ログインすると、1日の生成上限も2回から10回にアップします。</p>' +
+        '<p class="muted">新規登録は<b>実際に受信できるメールアドレス</b>が必要です。送信された6桁の認証コードで本人確認します。ログインすると、1日の生成上限も' + lim.anon + '回から' + lim.logged + '回にアップします。</p>' +
         '<button type="button" class="btn block" id="goto-login">ログイン / 新規登録</button>';
       var b = document.getElementById("goto-login");
       if (b) b.addEventListener("click", function () { CareerAI.auth.openModal(); });

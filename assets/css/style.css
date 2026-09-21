@@ -390,6 +390,24 @@ mark.ph {
 .auth-form input:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 .auth-err { color: var(--warn); font-size: 0.82rem; min-height: 1.1em; margin: 0; }
 .auth-hint { font-size: 0.74rem; opacity: 0.8; margin: 0.6rem 0 0; }
+/* .auth-form は display:flex のため、hidden 属性だけでは隠れない（作者CSSがUAの[hidden]に勝つ） */
+.auth-form[hidden] { display: none; }
+#auth-notice { margin: 0.4rem 0 0; }
+#auth-notice[hidden] { display: none; }
+/* 注意喚起の本文（既定の --warn は明度が高く本文には薄いため専用色） */
+.warn { color: oklch(0.55 0.16 55); font-weight: 600; }
+[data-theme="dark"] .warn { color: oklch(0.80 0.12 75); }
+
+/* メール認証（コード入力）ビュー */
+#auth-verify { display: flex; flex-direction: column; gap: 0.6rem; }
+#auth-verify[hidden] { display: none; }
+.auth-verify-msg { font-size: 0.85rem; line-height: 1.5; color: var(--ink-soft); margin: 0; }
+#auth-code {
+  font: inherit; letter-spacing: 4px; text-align: center; font-weight: 700;
+  padding: 0.6rem 0.7rem; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink); min-height: 2.5rem;
+}
+#auth-code:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 
 /* マイページ */
 .account-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; }

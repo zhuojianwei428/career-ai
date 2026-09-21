@@ -104,9 +104,8 @@ window.CareerAI = (function () {
       result.classList.remove("placeholder");
       makeEditable(result);
       showContextNote(data);
-      if (CareerAI.auth && CareerAI.auth.isLoggedIn() && !data.mock) {
-        CareerAI.auth.saveRecord(config.tool, vals, data.text);
-      }
+      // 履歴の保存はサーバ側（/api/generate 内で session がある場合のみ）で行う。
+      // ここで再度 POST すると1回の生成で履歴が2件重複するため、クライアントからは保存しない。
       const rem = (data.remaining != null) ? "（本日あと " + data.remaining + " 回）" : "";
       if (data.companyContextUsed) {
         setStatus("公開情報から抽出しました（要確認）。そのまま編集してください。" + rem, "ok");
@@ -206,7 +205,7 @@ window.CareerAI = (function () {
 
   // ---------- 認証 / マイページ（ログイン不要でも動作；Redis 未設定時は login のみ無効） ----------
   var Auth = (function () {
-    var state = { loggedIn: false, email: null, configured: true };
+    var state = { loggedIn: false, email: null, configured: true, emailConfigured: true, anonLimit: 2, loggedLimit: 5 };
     var modal = null;
 
     async function me() {
@@ -216,11 +215,20 @@ window.CareerAI = (function () {
         state.loggedIn = !!d.loggedIn;
         state.email = d.email || null;
         state.configured = d.configured !== false;
+        state.emailConfigured = d.emailConfigured !== false;
+        if (typeof d.anonDailyLimit === "number") state.anonLimit = d.anonDailyLimit;
+        if (typeof d.loggedDailyLimit === "number") state.loggedLimit = d.loggedDailyLimit;
       } catch (e) {
         state.configured = false;
       }
       renderNav();
       applyQuotaUI();
+    }
+    // ストア／メール送信が未設定のときは、必ず失敗する入力欄を出さない
+    function unavailableReason() {
+      if (!state.configured) return "現在ログイン機能を準備中です。ご利用いただけるまで今しばらくお待ちください。";
+      if (!state.emailConfigured) return "現在メール送信の準備中です。新規登録はもうしばらくお待ちください。";
+      return null;
     }
 
     function renderNav() {
@@ -242,12 +250,13 @@ window.CareerAI = (function () {
     function applyQuotaUI() {
       const note = document.getElementById("limit-note");
       if (!note) return;
+      const a = state.anonLimit, l = state.loggedLimit;
       if (state.loggedIn) {
-        note.textContent = "ログイン中：1日最大10回まで生成でき、履歴はマイページに保存されます。";
+        note.textContent = "ログイン中：1日最大" + l + "回まで生成でき、履歴はマイページに保存されます。";
       } else if (state.configured) {
-        note.textContent = "ログイン不要・本日最大2回まで。ログインすると1日10回まで、かつ生成履歴を保存できます。";
+        note.textContent = "ログイン不要・本日最大" + a + "回まで。ログインすると1日" + l + "回まで、かつ生成履歴を保存できます。";
       } else {
-        note.textContent = "ログイン不要・本日最大2回まで。";
+        note.textContent = "ログイン不要・本日最大" + a + "回まで。";
       }
     }
 
@@ -265,12 +274,20 @@ window.CareerAI = (function () {
             '<button type="button" class="auth-tab" data-tab="register">新規登録</button>' +
           '</div>' +
           '<form id="auth-form" class="auth-form" novalidate>' +
-            '<label>メールアドレス<input type="email" id="auth-email" autocomplete="email" placeholder="example@coverletterkit.com"></label>' +
-            '<label>パスワード<input type="password" id="auth-pw" autocomplete="current-password" placeholder="6文字以上"></label>' +
+            '<label>メールアドレス<input type="email" id="auth-email" autocomplete="email" placeholder="you@example.com" required></label>' +
+            '<label>パスワード<input type="password" id="auth-pw" autocomplete="current-password" placeholder="6文字以上" required></label>' +
             '<button type="submit" class="btn block" id="auth-submit">ログイン</button>' +
             '<p class="auth-err" id="auth-err"></p>' +
           '</form>' +
-          '<p class="auth-hint">アカウントは生成履歴の保存・照会用です。パスワードはハッシュ保存され、平文は保存されません。</p>' +
+          '<div id="auth-verify" hidden>' +
+            '<p class="auth-verify-msg" id="auth-verify-msg"></p>' +
+            '<label>認証コード（6桁）<input type="text" id="auth-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456"></label>' +
+            '<button type="button" class="btn block" id="auth-verify-btn">認証して登録</button>' +
+            '<button type="button" class="btn ghost block mini" id="auth-resend">コードを再送信</button>' +
+            '<p class="auth-err" id="auth-verify-err"></p>' +
+          '</div>' +
+          '<p class="auth-hint">新規登録には<b>実際に受信できるメールアドレス</b>が必要です。6桁の認証コードで本人確認します（コードは10分間有効）。アカウントは生成履歴の保存・照会用で、パスワードはハッシュ保存され平文は保存されません。</p>' +
+          '<div id="auth-notice" hidden><p class="auth-verify-msg"></p></div>' +
         '</div>';
       document.body.appendChild(modal);
       modal.querySelectorAll("[data-close]").forEach(function (el) {
@@ -284,15 +301,20 @@ window.CareerAI = (function () {
         const tab = modal.querySelector(".auth-tab.active").getAttribute("data-tab");
         if (tab === "register") doRegister(); else doLogin();
       });
+      const vb = modal.querySelector("#auth-verify-btn");
+      if (vb) vb.addEventListener("click", doVerify);
+      const rb = modal.querySelector("#auth-resend");
+      if (rb) rb.addEventListener("click", doResend);
     }
 
     let currentTab = "login";
+    let pendingEmail = null; // 認証コード入力待ちのメール（再オープン時に復元する）
     function switchTab(tab) {
       currentTab = tab;
       modal.querySelectorAll(".auth-tab").forEach(function (t) {
         t.classList.toggle("active", t.getAttribute("data-tab") === tab);
       });
-      modal.querySelector("#auth-submit").textContent = tab === "register" ? "新規登録してログイン" : "ログイン";
+      modal.querySelector("#auth-submit").textContent = tab === "register" ? "認証コードを受け取る" : "ログイン";
       modal.querySelector("#auth-err").textContent = "";
       const pw = modal.querySelector("#auth-pw");
       pw.setAttribute("autocomplete", tab === "register" ? "new-password" : "current-password");
@@ -300,6 +322,25 @@ window.CareerAI = (function () {
     function openModal() {
       ensureModal();
       modal.hidden = false;
+      // 認証ビューをリセットして通常のログイン/登録表示に戻す
+      const v = modal.querySelector("#auth-verify");
+      if (v) v.hidden = true;
+      modal.querySelectorAll(".auth-tab").forEach(function (t) { t.style.display = ""; });
+      const f = modal.querySelector("#auth-form");
+      if (f) f.hidden = false;
+      const n = modal.querySelector("#auth-notice");
+      const reason = unavailableReason();
+      if (n) n.hidden = !reason;
+      if (reason) {
+        const msg = n.querySelector(".auth-verify-msg");
+        if (msg) msg.textContent = reason;
+        modal.querySelectorAll(".auth-tab").forEach(function (t) { t.style.display = "none"; });
+        if (f) f.hidden = true;
+        if (v) v.hidden = true;
+        return;
+      }
+      // 認証コード入力待ちなら、その画面に戻す（コード再送を無駄にしない）
+      if (pendingEmail) { showVerify(pendingEmail); return; }
       switchTab("login");
       setTimeout(function () { const e = modal.querySelector("#auth-email"); if (e) e.focus(); }, 30);
     }
@@ -321,6 +362,7 @@ window.CareerAI = (function () {
         });
         const d = await r.json();
         if (!r.ok || !d.loggedIn) { setErr(d.error || "ログインに失敗しました。"); return; }
+        pendingEmail = null;
         state.loggedIn = true; state.email = d.email;
         close(); renderNav(); applyQuotaUI();
         if (typeof onAuthChange === "function") onAuthChange();
@@ -335,6 +377,8 @@ window.CareerAI = (function () {
       const email = modal.querySelector("#auth-email").value.trim();
       const pw = modal.querySelector("#auth-pw").value;
       setErr("");
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErr("メールアドレスの形式が正しくありません。"); return; }
+      if (pw.length < 6) { setErr("パスワードは6文字以上で入力してください。"); return; }
       const btn = modal.querySelector("#auth-submit");
       btn.disabled = true;
       try {
@@ -344,12 +388,78 @@ window.CareerAI = (function () {
           body: JSON.stringify({ action: "register", email: email, password: pw })
         });
         const d = await r.json();
-        if (!r.ok || !d.loggedIn) { setErr(d.error || "登録に失敗しました。"); return; }
+        if (!r.ok) { setErr((d && d.error) || "登録に失敗しました。"); return; }
+        if (d.needVerify) { pendingEmail = email; showVerify(email); return; }
+        if (d.loggedIn) {
+          pendingEmail = null;
+          state.loggedIn = true; state.email = d.email;
+          close(); renderNav(); applyQuotaUI();
+          if (typeof onAuthChange === "function") onAuthChange();
+        }
+      } catch (e) {
+        setErr("通信エラーが発生しました。");
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function showVerify(email) {
+      pendingEmail = email;
+      modal.querySelectorAll(".auth-tab").forEach(function (t) { t.style.display = "none"; });
+      const f = modal.querySelector("#auth-form");
+      if (f) f.hidden = true;
+      const v = modal.querySelector("#auth-verify");
+      v.hidden = false;
+      modal.querySelector("#auth-verify-msg").textContent =
+        "認証コードを " + email + " に送信しました。受信メールから6桁のコードを入力してください（10分間有効）。";
+      modal.querySelector("#auth-verify-err").textContent = "";
+      modal.querySelector("#auth-code").value = "";
+      setTimeout(function () { const c = modal.querySelector("#auth-code"); if (c) c.focus(); }, 30);
+    }
+
+    async function doVerify() {
+      const email = (modal.querySelector("#auth-email").value || "").trim();
+      const code = (modal.querySelector("#auth-code").value || "").trim();
+      const errEl = modal.querySelector("#auth-verify-err");
+      errEl.textContent = "";
+      const btn = modal.querySelector("#auth-verify-btn");
+      btn.disabled = true;
+      try {
+        const r = await fetch("/api/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "verify", email: email, code: code })
+        });
+        const d = await r.json();
+        if (!r.ok || !d.loggedIn) { errEl.textContent = (d && d.error) || "認証に失敗しました。"; return; }
+        pendingEmail = null;
         state.loggedIn = true; state.email = d.email;
         close(); renderNav(); applyQuotaUI();
         if (typeof onAuthChange === "function") onAuthChange();
       } catch (e) {
-        setErr("通信エラーが発生しました。");
+        errEl.textContent = "通信エラーが発生しました。";
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function doResend() {
+      const email = (modal.querySelector("#auth-email").value || "").trim();
+      const errEl = modal.querySelector("#auth-verify-err");
+      const btn = modal.querySelector("#auth-resend");
+      btn.disabled = true;
+      try {
+        const r = await fetch("/api/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "resend", email: email })
+        });
+        const d = await r.json();
+        if (!r.ok) { errEl.textContent = (d && d.error) || "再送信に失敗しました。"; return; }
+        errEl.textContent = "";
+        modal.querySelector("#auth-verify-msg").textContent = "認証コードを再送信しました。新しいコードを入力してください。";
+      } catch (e) {
+        errEl.textContent = "通信エラーが発生しました。";
       } finally {
         btn.disabled = false;
       }
@@ -363,29 +473,18 @@ window.CareerAI = (function () {
           body: JSON.stringify({ action: "logout" })
         });
       } catch (e) {}
-      state.loggedIn = false; state.email = null;
+      state.loggedIn = false; state.email = null; pendingEmail = null;
       renderNav(); applyQuotaUI();
       if (typeof onAuthChange === "function") onAuthChange();
     }
 
-    // 生成成功時に呼ぶ（ログイン中のみ記録を保存；失敗は無視）
-    function saveRecord(tool, vals, text) {
-      if (!state.loggedIn || !text) return;
-      fetch("/api/records", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tool: tool,
-          scene: (vals && vals["応募種別"]) || "",
-          company: (vals && vals["企業名"]) || "",
-          len: (vals && vals["文字数"]) || "",
-          tone: (vals && vals["トーン"]) || "",
-          text: text
-        })
-      }).catch(function () {});
-    }
+    // 生成記録の保存はサーバ側（api/generate.js の persistRecord）が担当する。
+    // クライアントから保存すると重複するため、ここでは何もしない（後方互換のための no-op）。
+    function saveRecord() { /* server-side */ }
 
     function isLoggedIn() { return state.loggedIn; }
+    // 画面文言用：サーバが返した実際の上限値
+    function limits() { return { anon: state.anonLimit, logged: state.loggedLimit, configured: state.configured }; }
 
     // ナビに auth-area を注入（全ページ共通）
     function init() {
@@ -404,7 +503,7 @@ window.CareerAI = (function () {
       me();
     }
 
-    return { init: init, me: me, login: doLogin, register: doRegister, logout: logout, saveRecord: saveRecord, isLoggedIn: isLoggedIn, openModal: openModal };
+    return { init: init, me: me, login: doLogin, register: doRegister, logout: logout, saveRecord: saveRecord, isLoggedIn: isLoggedIn, limits: limits, openModal: openModal };
   })();
 
   // 生成成功時にログイン中なら記録を保存

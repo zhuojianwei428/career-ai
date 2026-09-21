@@ -16,9 +16,18 @@ function makeFetch(behavior) {
   };
 }
 function resMock() {
-  return { _c: 0, _j: null, status(c) { this._c = c; return this; }, json(o) { this._j = o; return this; } };
+  return {
+    _c: 0, _j: null, _headers: {},
+    setHeader(k, v) { this._headers[String(k).toLowerCase()] = v; },
+    status(c) { this._c = c; return this; },
+    json(o) { this._j = o; return this; }
+  };
 }
 const handler = (await import("./api/generate.js")).default;
+// リクエストモック（Cookie 無し＝匿名）。generate.js は Cookie 制限を行うため headers が必須。
+function reqMock(body) {
+  return { method: "POST", headers: {}, body: JSON.stringify(body) };
+}
 const baseBody = { tool: "shibou", fields: { "企業名": "テスト", "経験・キーワード": "x" } };
 
 // S1: 1番目(qwen-plus)が無料枠枯渇(429) → qwen-max で成功
@@ -27,7 +36,7 @@ global.fetch = makeFetch((m) => m === "qwen-plus"
   ? { status: 429, payload: { error: { message: "free quota exhausted" } } }
   : { status: 200, payload: { choices: [{ message: { content: "OK from " + m } }] } });
 let res = resMock();
-await handler({ method: "POST", body: JSON.stringify(baseBody) }, res);
+await handler(reqMock(baseBody), res);
 console.log("[S1] status=%d tried=%j model=%s text=%s", res._c, callLog, res._j.model, (res._j.text || "").slice(0, 20));
 const s1ok = res._c === 200 && res._j.model === "qwen-max" && callLog[0] === "qwen-plus" && callLog[1] === "qwen-max";
 
@@ -37,7 +46,7 @@ global.fetch = makeFetch((m) => FREE.includes(m)
   ? { status: 429, payload: { error: { message: "free quota exhausted" } } }
   : { status: 200, payload: { choices: [{ message: { content: "OK from " + m } }] } });
 res = resMock();
-await handler({ method: "POST", body: JSON.stringify(baseBody) }, res);
+await handler(reqMock(baseBody), res);
 console.log("[S2] status=%d tried=%j model=%s freeQuotaExhausted=%s text=%s", res._c, callLog, res._j.model, res._j.freeQuotaExhausted, (res._j.text || "").slice(0, 20));
 const s2ok = res._c === 200 && res._j.model === "qwen3.8-flash" && !res._j.freeQuotaExhausted && callLog[5] === "qwen3.8-flash";
 
@@ -45,7 +54,7 @@ const s2ok = res._c === 200 && res._j.model === "qwen3.8-flash" && !res._j.freeQ
 callLog = [];
 global.fetch = makeFetch(() => ({ status: 401, payload: { error: { message: "AuthFailed" } } }));
 res = resMock();
-await handler({ method: "POST", body: JSON.stringify(baseBody) }, res);
+await handler(reqMock(baseBody), res);
 console.log("[S3] status=%d tried=%j (401は1回のみ)", res._c, callLog);
 const s3ok = res._c === 500 && callLog.length === 1;
 
@@ -53,7 +62,7 @@ const s3ok = res._c === 500 && callLog.length === 1;
 callLog = [];
 global.fetch = makeFetch(() => ({ status: 429, payload: { error: { message: "all exhausted" } } }));
 res = resMock();
-await handler({ method: "POST", body: JSON.stringify(baseBody) }, res);
+await handler(reqMock(baseBody), res);
 console.log("[S4] status=%d tried=%j freeQuotaExhausted=%s mock=%s hasPlaceholder=%s", res._c, callLog, res._j.freeQuotaExhausted, res._j.mock, (res._j.text || "").includes("【"));
 const s4ok = res._c === 200 && res._j.freeQuotaExhausted === true && res._j.mock === true && res._j.text.includes("【") && callLog.includes("qwen3.8-flash");
 

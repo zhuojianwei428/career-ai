@@ -102,12 +102,64 @@ export async function getUserById(id) {
 export async function createUser(email, pw) {
   const kv = await getKV();
   if (!kv) return null;
-  const id = "u_" + randomBytes(8).toString("hex");
   const { salt, hash } = hashPassword(pw);
-  const u = { id, email: email.toLowerCase().trim(), salt, hash, createdAt: Date.now() };
+  return createUserHashed(email, salt, hash);
+}
+// メール認証後に、保留しておいたハッシュでユーザーを確定作成する
+export async function createUserHashed(email, salt, hash) {
+  const kv = await getKV();
+  if (!kv) return null;
+  const id = "u_" + randomBytes(8).toString("hex");
+  const u = { id, email: email.toLowerCase().trim(), salt, hash, createdAt: Date.now(), verified: true };
   await kv.set("user:" + id, u);
   await kv.set("user:email:" + u.email, id); // メール→ID 索引
   return u;
+}
+
+// ---- メール認証（登録時の確認コード） ----
+// 保留データ: verify:<email> = { code, salt, hash, exp }（10分）
+export async function storePendingVerification(email, code, salt, hash) {
+  const kv = await getKV();
+  if (!kv) return false;
+  const key = "verify:" + email.toLowerCase().trim();
+  await kv.set(key, JSON.stringify({ code: String(code), salt, hash, exp: Date.now() + 600000 }), { ex: 600 });
+  return true;
+}
+export async function getPendingVerification(email) {
+  const kv = await getKV();
+  if (!kv) return null;
+  const raw = await kv.get("verify:" + email.toLowerCase().trim());
+  if (!raw) return null;
+  let o; try { o = typeof raw === "string" ? JSON.parse(raw) : raw; } catch (e) { return null; }
+  if (!o || o.exp < Date.now()) { await delPendingVerification(email); return null; }
+  return o;
+}
+export async function delPendingVerification(email) {
+  const kv = await getKV();
+  if (!kv) return;
+  await kv.del("verify:" + email.toLowerCase().trim());
+}
+// コード誤入力の試行回数を加算（総当たり対策。残り TTL は維持）
+export async function incPendingTries(email) {
+  const kv = await getKV();
+  if (!kv) return 0;
+  const key = "verify:" + email.toLowerCase().trim();
+  const raw = await kv.get(key);
+  if (!raw) return 0;
+  let o; try { o = typeof raw === "string" ? JSON.parse(raw) : raw; } catch (e) { return 0; }
+  o.tries = (o.tries || 0) + 1;
+  const left = Math.max(1, Math.ceil(((o.exp || 0) - Date.now()) / 1000));
+  await kv.set(key, JSON.stringify(o), { ex: left });
+  return o.tries;
+}
+// 同一メールの短時間連続送信を防ぐ（10分窓で最大5回）
+export async function incResendCount(email) {
+  const kv = await getKV();
+  if (!kv) return 0;
+  const key = "verify:resend:" + email.toLowerCase().trim();
+  const n = (Number(await kv.get(key)) || 0) + 1;
+  await kv.set(key, n, { ex: 600 });
+  return n;
 }
 
 // ---- 生成記録 ----

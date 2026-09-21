@@ -20,7 +20,7 @@ const FALLBACK_MODELS = (process.env.MODEL_FALLBACK && process.env.MODEL_FALLBAC
     : ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen-flash", "qwen3.8-flash"];
 
 // ログイン中ユーザの1日上限（匿名は下の DAILY_LIMIT=2）。Redis 未設定時は匿名扱い。
-const LOGGED_DAILY = Number(process.env.LOGGED_DAILY_LIMIT) || 10;
+const LOGGED_DAILY = Number(process.env.LOGGED_DAILY_LIMIT) || 5;
 import { kvReady, resolveSession, getDailyUsage, incDailyUsage, saveRecord } from "./_lib/storage.mjs";
 
 // ログイン中のみ、真实生成の記録を保存（失敗しても生成結果には影響させない）
