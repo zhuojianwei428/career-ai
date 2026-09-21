@@ -1,7 +1,7 @@
-# 接入阿里云百炼 DashScope（国内站 · 無料モデル順次フォールバック）
+# 接入阿里云百炼 DashScope（国内站 · 無料モデル白嫖 ＋ 有料フォールバック qwen3.8-flash）
 
 本指南带你把 `coverletterkit.com` 的 AI 生成后端从「本地 mock」切到「百炼の無料モデルで白嫖」構成。
-方針：**複数の無料モデルを `MODEL_FALLBACK` に並べ、片方の無料枠が枯渇したら自動で次のモデルへ切替**。課金せずに運用できる。
+方針：**複数の無料モデルを `MODEL_FALLBACK` に並べ、片方の無料枠が枯渇したら自動で次のモデルへ切替**。さらに末尾の `qwen3.8-flash` を「有料フォールバック」として置き、アカウントにチャージ残高があれば無料枠枯渇後も自動で継続生成する（すでにチャージ済み）。
 
 > 状況：すでに百炼の汎用 API Key（`sk-ws-` 始まる）を入手済み。`api/generate.js` は OpenAI 互換で、**コード変更なし**で接続。
 > `OPENAI_BASE_URL` 未設定時は既定で `https://dashscope.aliyuncs.com/compatible-mode/v1`（百炼）を使用。
@@ -34,7 +34,7 @@
 |---|---|---|
 | `OPENAI_API_KEY` | 百炼 汎用 API Key | デスクトップの `新建 文本文档.txt` に記載の `sk-ws-...` キー |
 | `OPENAI_BASE_URL` | 百炼 OpenAI 互換端点 | `https://dashscope.aliyuncs.com/compatible-mode/v1`（未設定でも既定） |
-| `MODEL_FALLBACK` | 無料モデル順序（カンマ区切り） | `qwen-plus,qwen-max,qwen-turbo,qwen-long,qwen-flash`（いずれも検証済み 200） |
+| `MODEL_FALLBACK` | モデル順序（カンマ区切り・末尾は有料兜底） | `qwen-plus,qwen-max,qwen-turbo,qwen-long,qwen-flash,qwen3.8-flash`（無料5つ検証済み200；末尾 qwen3.8-flash は有料フォールバック） |
 
 ※ `OPENAI_MODEL` は単一モデル指定用（MODEL_FALLBACK 未設定時のみ使用）。変数名は `OPENAI_*` のまま、値に百炼を入れる。
 ※ キーは **Vercel の Environment Variables にのみ設定**し、コード・Git には絶対に含めない（`.env` も gitignore 推奨）。
@@ -126,20 +126,22 @@ node test-qwen.mjs
 
 ---
 
-## 六、本番構成：国内百炼（阿里云中国站）の無料モデル順次フォールバック
+## 六、本番構成：国内百炼（阿里云中国站）の「無料白嫖 ＋ 有料フォールバック qwen3.8-flash」
 
-**現在の採用構成**。百炼の各モデルは独立して 100 万トークンの無料枠（90 日）を持つ。これを活かし、複数モデルを `MODEL_FALLBACK` に並べて「白嫖」する：
+**現在の採用構成（チャージ済み）**。百炼の各モデルは独立して 100 万トークンの無料枠（90 日）を持つ。これを「白嫖」しつつ、無料枠が枯渇しても生成を止めないよう、末尾に有料フォールバック `qwen3.8-flash` を置く：
 
 1. `OPENAI_API_KEY` = すでに取得済みの百炼汎用キー（`sk-ws-` 始まる）
 2. `OPENAI_BASE_URL` = `https://dashscope.aliyuncs.com/compatible-mode/v1`
-3. `MODEL_FALLBACK` = `qwen-plus,qwen-max,qwen-turbo,qwen-long,qwen-flash`
+3. `MODEL_FALLBACK` = `qwen-plus,qwen-max,qwen-turbo,qwen-long,qwen-flash,qwen3.8-flash`
    - `qwen-plus` が主軸（バランス◎）。無料枠枯渇 → `qwen-max` → `qwen-turbo` → `qwen-long` → `qwen-flash` と自動切替。
+   - **末尾の `qwen3.8-flash` は「有料フォールバック」**：上記無料5つがいずれも 429（無料枠枯渇）になったら自動で呼ばれ、アカウントにチャージ残高があれば有料で継続生成。**サイトは止まらない。**
    - 切替の判定：`429`（レート/無料枠枯渇）・`400`（モデル不在）・`5xx` は次へ。`401/403`（認証）は即失敗。
-   - **全モデル枯渇時**：「不捏造」骨架（【】占位符付き）を返し、サイトは止まらない（`freeQuotaExhausted:true` を返す）。
-   - 順序の変更/追加は `MODEL_FALLBACK` を上書きするだけ（例：より安い `qwen-turbo` を先頭にして枠を伸ばすことも可）。
-4. ローカル動作確認：`test-fallback.mjs`（無料枠枯渇→自動切替→全滅退化をモックで検証、実APIは呼ばない）。
+   - **真の全滅（無料5つ＋有料 qwen3.8-flash も不可）時のみ**：「不捏造」骨架（【】占位符付き）を返し、サイトは止まらない（`freeQuotaExhausted:true` を返す）。
+   - 順序の変更/追加は `MODEL_FALLBACK` を上書きするだけ（例：より安い `qwen-turbo` を先頭にして無料枠を伸ばすことも可）。
+4. ローカル動作確認：`test-fallback.mjs`（無料枠枯渇→有料兜底継続→全滅退化 をモックで検証、実APIは呼ばない）。
 
 ⚠️ 注意：
-- 課金しない限り**無料枠のみ消費**。各モデルの無料枠残量は百炼コンソール「リソースパック」で確認。
+- `qwen3.8-flash` は **reasoning（思考）モデル**。content は clean だが reasoning トークンも課金・少し遅い。更快/更省にしたい場合は `api/generate.js` の `callModel` でリクエスト body に `enable_thinking:false` を追加。
 - 遅延：国内端点から日本アクセスで約 200–400ms（生成 1–3 秒、体感可）。
 - コンプライアンス：入力は阿里云国内へ送信（データ出境扱い）。求职テキストの秘密度は低いが留意。
+- 無料枠残量 / チャージ残高は百炼コンソール「リソースパック」で確認。

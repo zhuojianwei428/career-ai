@@ -5,17 +5,19 @@
 //   3) 企業固有の内容は取得・入力された事実のみから記述、不明は【】占位符
 //   4) 入力不足時は骨架+占位符を返し、経歴を捏造しない
 // OpenAI 互換 API を呼ぶ。環境変数 OPENAI_API_KEY が無い場合は日本語デモ(同ルール適用)。
-// 複数の無料モデルを順に試し、無料枠枯渇時は自動で次のモデルへ切替(MODEL_FALLBACK)。
+// 無料モデルを順に試し、無料枠枯渇時は自動で次のモデルへ。末尾の qwen3.8-flash は「有料フォールバック」：
+// アカウントにチャージ残高があれば、無料枠枯渇後も自動で継続生成（サイトは止まらない）。
 
 const BASE_URL = process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const MAX_TOKENS = 1600;
-// 無料モデル順次フォールバック（百炼の各モデルは独立して100万トークンの無料枠あり）
-// 片方の無料枠が枯渇したら自動で次のモデルへ。MODEL_FALLBACK で順序を上書き可能。
+// 無料モデル順次フォールバック（百炼の各モデルは独立して100万トークンの無料枠あり）。
+// 末尾の qwen3.8-flash は「有料フォールバック」＝チャージ残高があれば無料枠枯渇後も継続生成。
+// qwen3.8-flash は reasoning（思考）モデル。更快/更省にしたい場合は callModel の body に enable_thinking:false を追加。
 const FALLBACK_MODELS = (process.env.MODEL_FALLBACK && process.env.MODEL_FALLBACK.trim())
   ? process.env.MODEL_FALLBACK.split(",").map((s) => s.trim()).filter(Boolean)
   : (process.env.OPENAI_MODEL && process.env.OPENAI_MODEL.trim() && process.env.OPENAI_MODEL !== "gpt-4o-mini")
     ? [process.env.OPENAI_MODEL.trim()]
-    : ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen-flash"];
+    : ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen-flash", "qwen3.8-flash"];
 
 // ---------- gBizINFO (経済産業省 法人情報 REST API v2) ----------
 // エンドポイント: https://api.info.gbiz.go.jp/hojin/v2/hojin/{法人番号}
@@ -394,10 +396,10 @@ export default async function handler(req, res) {
         { role: "user", content: user }
       ]);
       if (!result) {
-        // 全無料モデル枯渇: 不捏造骨架を返し、通知（サイトは停止しない）
+        // 全モデル失敗（無料枠枯渇＋有料フォールバック qwen3.8-flash も不可）: 不捏造骨架を返し通知
         const m = mock(body.tool || "shibou", f, merged);
         m.notice = (m.notice ? m.notice + " " : "") +
-          "※すべての無料モデルの無料枠が枯渇しました。しばらく経ってから再度お試しいただくか、有料課金を有効化してください。";
+          "※すべてのモデルが一時的に利用できませんでした（無料枠枯渇・有料フォールバック qwen3.8-flash も失敗）。しばらく経ってから再度お試しください。";
         m.freeQuotaExhausted = true;
         m.mock = true;
         res.status(200).json(m);
@@ -431,7 +433,7 @@ export default async function handler(req, res) {
     const result = await generateWithFallback(messages);
     if (!result) {
       res.status(200).json(Object.assign(legacyMock(system, userText), {
-        notice: "※すべての無料モデルの無料枠が枯渇しました。",
+        notice: "※すべてのモデルが一時的に利用できませんでした。",
         freeQuotaExhausted: true
       }));
       return;

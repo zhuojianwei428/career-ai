@@ -34,16 +34,17 @@ npx serve .        # または python -m http.server
 2. 環境変数を設定（未設定ならデモ動作）。`api/generate.js` は OpenAI 互換。モデルは複数指定でき、無料枠枯渇時に自動で次へ切替：
    - `OPENAI_API_KEY` ：API キー
    - `OPENAI_BASE_URL`：（任意）互換エンドポイント。未設定時は `https://dashscope.aliyuncs.com/compatible-mode/v1`（百炼）
-   - `MODEL_FALLBACK` ：（推奨）カンマ区切りのモデル順序。例 `qwen-plus,qwen-max,qwen-turbo,qwen-long,qwen-flash`
+   - `MODEL_FALLBACK` ：（推奨）カンマ区切りのモデル順序。末尾に有料フォールバック `qwen3.8-flash` を置くと、無料枠枯渇後もチャージ残高があれば継続生成。例 `qwen-plus,qwen-max,qwen-turbo,qwen-long,qwen-flash,qwen3.8-flash`
    - `OPENAI_MODEL`   ：（任意）単一モデル指定時（MODEL_FALLBACK 未設定時のみ利用）
 3. デプロイ。各ツールは `/` `/jiko-pr.html` 等の静的ページ、生成は `/api/generate` 関数。
 
-### 推奨（白嫖構成）：阿里云百炼 DashScope の無料モデル順次フォールバック
-百炼の各モデルは独立して 100 万トークンの無料枠（90 日）あり。複数を `MODEL_FALLBACK` に並べ、片方の無料枠が枯渇したら自動で次のモデルへ切替わる（認証エラー以外は全滅まで回る。全滅時は「不捏造」骨架に優雅に退化しサイトは止まらない）。詳細は **[QWEN_SETUP.md](./QWEN_SETUP.md)**、フォールバック単体テストは `test-fallback.mjs`。
+### 推奨構成：阿里云百炼 DashScope の「無料白嫖 ＋ 有料フォールバック」
+百炼の各モデルは独立して 100 万トークンの無料枠（90 日）あり。複数を `MODEL_FALLBACK` に並べ、片方の無料枠が枯渇したら自動で次のモデルへ切替わる。さらに**末尾の `qwen3.8-flash` を「有料フォールバック」として置く**と、アカウントにチャージ残高があれば無料枠枯渇後も自動で継続生成（サイトは止まらない）。認証エラー以外は全滅まで回り、全滅時のみ「不捏造」骨架に優雅に退化。詳細は **[QWEN_SETUP.md](./QWEN_SETUP.md)**、フォールバック単体テストは `test-fallback.mjs`。
 - `OPENAI_API_KEY` = 百炼（aliyun.com / dashscope）で作成した API Key（`sk-ws-` 始まる汎用キー）
 - `OPENAI_BASE_URL` = `https://dashscope.aliyuncs.com/compatible-mode/v1`（未設定でも既定）
-- `MODEL_FALLBACK` = `qwen-plus,qwen-max,qwen-turbo,qwen-long,qwen-flash`（検証済み：いずれも無料枠で 200 応答）
-※ 国内站は実名認証（中国身份证）必須。課金しない限り無料枠のみ消費。各モデルの無料枠状況は百炼コンソール「リソースパック」で確認。
+- `MODEL_FALLBACK` = `qwen-plus,qwen-max,qwen-turbo,qwen-long,qwen-flash,qwen3.8-flash`（無料5つは検証済み 200；末尾 qwen3.8-flash は有料フォールバック、チャージで継続生成）
+※ `qwen3.8-flash` は reasoning（思考）モデル。更快/更省にしたい場合は `api/generate.js` の呼び出しに `enable_thinking:false` を追加。
+※ 国内站は実名認証（中国身份证）必須。各モデルの無料枠残量は百炼コンソール「リソースパック」で確認。
 
 ## 次の拡張（クラスタ深化）
 - 各ツールの「職種別」サブページ（例：`/shinsotsu/eigyo.html`）で長尾を取りに行く
