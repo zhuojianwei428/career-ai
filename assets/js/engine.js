@@ -230,7 +230,8 @@ window.CareerAI = (function () {
         // 上限で切れた文をそのまま「完成」と言わない（字数カウンタとも辻褄が合わなくなる）
         setStatus("生成しましたが、文が途中で切れた可能性があります。もう一度生成するか、文字数の目安を短くしてください。" + rem, "warn");
       } else if (data.companyContextUsed) {
-        setStatus("確認した企業情報を反映しました（要確認）。そのまま編集できます。" + rem, "ok");
+        // 利用者は P0-0 で既に確認済みなので、「確認が必要」という但し書きを添えると自己矛盾する
+        setStatus("選んだ法人の登録情報を反映しました（確認済み・法人番号つき）。そのまま編集できます。" + rem, "ok");
       } else if (phLeft) {
         setStatus("入力が足りない箇所は【 】のまま残しました（" + phLeft + " 箇所）。クリックするとその場で埋められます。" + rem, "warn");
       } else if (data.missingExperience) {
