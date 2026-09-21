@@ -14,6 +14,8 @@ import { readFileSync, existsSync } from "node:fs";
 const BASE = "https://www.coverletterkit.com";
 const PAGES = ["index.html", "jiko-pr.html", "rirekisho.html", "shokumu.html", "mensetsu.html"];
 const NOINDEX_PAGES = ["account.html"];
+// ツールではないがインデックスさせたいページ（EXAMPLE やフォームを持たないため PAGES とは分ける）
+const EXTRA_INDEXABLE = ["privacy.html"];
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -44,7 +46,7 @@ ok(sm.includes('xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'), "sitemap 
 ok(!/<changefreq>|<priority>/.test(sm), "sitemap に Google が無視する changefreq/priority を書いていない");
 
 const locs = [...sm.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
-ok(locs.length === PAGES.length, "sitemap の URL 数が対象ページ数と一致（" + locs.length + "/" + PAGES.length + "）");
+ok(locs.length === PAGES.length + EXTRA_INDEXABLE.length, "sitemap の URL 数が対象ページ数と一致（" + locs.length + "/" + (PAGES.length + EXTRA_INDEXABLE.length) + "）");
 ok(new Set(locs).size === locs.length, "sitemap に重複 URL がない");
 ok(locs.every((u) => u.startsWith(BASE)), "sitemap の URL がすべて本番ドメイン配下");
 
@@ -55,7 +57,7 @@ for (const u of locs) {
   ok(existsSync(new URL("./" + file, import.meta.url)), "sitemap の " + path + " に対応する " + file + " が存在する");
 }
 // 逆に、インデックスさせたい実在ページが漏れていないか
-for (const p of PAGES) {
+for (const p of PAGES.concat(EXTRA_INDEXABLE)) {
   ok(locs.some((u) => u === BASE + "/" + (p === "index.html" ? "" : p)), "sitemap に " + p + " 相当の URL が含まれる");
 }
 for (const p of NOINDEX_PAGES) {
@@ -95,7 +97,7 @@ if (faqLd) {
   // Google の要件：構造化データに書いた内容は必ずページ上に見えていること
   eq(declared, visible, "JSON-LD の Q/A が可視 FAQ と完全一致（順序・文言とも）");
   ok(declared.every((d) => d.q && d.a), "すべての Q/A が空でない");
-  ok(declared.every((d) => (d.a.match(/【[^】]*】/) || []).length === 0), "回答に空缺プレースホルダが残っていない");
+  ok(declared.every((d) => (d.a.match(/【[^】]*】/) || []).length === 0), "回答にプレースホルダ【】が残っていない");
   ok(!/aggregateRating|reviewCount|ratingValue/.test(ldBlocks[0]), "検証していない評価値を宣言していない");
 }
 
@@ -171,7 +173,7 @@ ok(
 // それでも nav は HTML の時点で一度描画されるため、器が HTML に無いと
 // 「初回描画 → スクリプトが挿入」の間で nav のリンク列がずれる（実測 632→446、186px）。
 // 6 ページすべてが器を HTML に持つことを固定する。
-for (const p of PAGES.concat(NOINDEX_PAGES)) {
+for (const p of PAGES.concat(NOINDEX_PAGES).concat(EXTRA_INDEXABLE)) {
   ok(
     /<span class="auth-area" id="auth-area"><\/span>/.test(read(p)),
     p + ": auth-area の器を HTML に持つ（JS 挿入による初回描画のずれを防ぐ）"
@@ -188,6 +190,7 @@ ok(
   "狭い画面では幅予約を解除してナビ高さを増やさない"
 );
 ok(/\.io-grid/.test(css) && /\.io-arrow/.test(css) && /\.example-bar/.test(css), "入力例→結果例 / 例ボタンのスタイルがある");
+ok(/\.card\.policy/.test(css), "プライバシーポリシー用のスタイルがある（.card の持ち上げを打ち消す）");
 
 /* ---------- 7. 計測タグが計測以外の用途に使われていない ---------- */
 ok(!/googletagmanager[\s\S]{0,80}adsbygoogle/.test(engine), "広告タグを混ぜていない");

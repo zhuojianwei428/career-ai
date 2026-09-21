@@ -74,7 +74,7 @@
             <input type="text" data-field="職種" placeholder="例：総務・人事、ITエンジニア">
           </div>
           <div class="field">
-            <label>志望企業名 <span class="hint">（任意）</span></label>
+            <label>志望企業名 <span class="hint">（必須）</span></label>
             <input type="text" data-field="企業名" placeholder="例：株式会社○○">
           </div>
         </div>
@@ -83,6 +83,7 @@
           <textarea data-field="経験・キーワード" placeholder="例：ゼミの研究で地域課題をフィールドワーク。貴社の〇〇事業に関心。"></textarea>
         </div>
         <button id="gen-btn" type="submit" class="btn block">履歴書の本文を生成する</button>
+        <p class="hint sub2">入力内容の取り扱いは<a href="/privacy.html">個人情報の取り扱い</a>をご確認ください。</p>
       </form>
 
       <p id="status" class="muted" style="min-height:1.2em"></p>
@@ -130,6 +131,7 @@
       <a href="/jiko-pr.html">自己PR</a>
       <a href="/shokumu.html">職務経歴書</a>
       <a href="/mensetsu.html">面接対策</a>
+      <a href="/privacy.html">個人情報の取り扱い</a>
     </nav>
   </div>
 </footer>
@@ -148,7 +150,7 @@
   };
   var TOOL_CONFIG = {
     tool: "rirekisho",
-    required: ["応募種別", "職種", "経験・キーワード"],
+    required: ["応募種別", "職種", "企業名", "経験・キーワード"],
     system: "あなたは日本の採用担当者が読んで納得する履歴書のプロライターです。入力から、学歴・職歴・志望動機・自己PRを含む履歴書の本文を作成してください。志望動機は結論ファースト・具体的内容にし、自己PRは強みとエピソードを含めてください。",
     buildUser: function (v) {
       return ["種別: " + (v["応募種別"] || ""),

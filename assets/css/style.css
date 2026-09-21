@@ -447,3 +447,20 @@ mark.ph {
 .btn.example { background: var(--brand-soft); color: var(--brand-ink); border: 1px dashed var(--brand); box-shadow: none; }
 .btn.example:hover { background: var(--brand); color: var(--on-brand); border-style: solid; transform: translateY(-1px); }
 
+/* ---------- 個人情報の取り扱い（読み物ページ） ---------- */
+/* .card のホバー持ち上げは長文ページでは邪魔なので打ち消す */
+.card.policy:hover { transform: none; box-shadow: var(--shadow); }
+.card.policy { line-height: 1.85; }
+.card.policy h2 { font-size: 1.0625rem; margin: 1.75rem 0 0.5rem; letter-spacing: -0.01em; }
+.card.policy h2:first-of-type { margin-top: 0.5rem; }
+.card.policy p { font-size: 0.9rem; margin: 0.5rem 0; }
+.card.policy ul { font-size: 0.9rem; margin: 0.5rem 0 0.75rem 1.25rem; }
+.card.policy li { margin: 0.25rem 0; }
+.card.policy code { font-size: 0.85em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 0.05em 0.35em; }
+.card.policy table { width: 100%; border-collapse: collapse; font-size: 0.86rem; margin: 0.75rem 0 1rem; }
+.card.policy th, .card.policy td { border: 1px solid var(--line); padding: 0.5rem 0.65rem; text-align: left; vertical-align: top; }
+.card.policy th { background: var(--surface-2); font-weight: 600; white-space: nowrap; color: var(--ink); }
+@media (max-width: 35rem) {
+  .card.policy th { white-space: normal; }
+}
+

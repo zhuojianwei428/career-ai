@@ -12,8 +12,10 @@ career-ai/
 ├─ shokumu.html       職務経歴書（写真枠付き）
 ├─ mensetsu.html      面接対策
 ├─ account.html       マイページ（生成履歴）
+├─ privacy.html       個人情報の取り扱い（プライバシーポリシー）
 ├─ robots.txt         Sitemap 宣言 ＋ /api/ と /account.html を除外
-├─ sitemap.xml        インデックス対象 5 ページ（loc と lastmod のみ）
+├─ sitemap.xml        インデックス対象 6 ページ（loc と lastmod のみ）
+├─ .vercelignore      内部ドキュメント・テストを配信対象から除外
 ├─ assets/css/style.css
 ├─ assets/js/engine.js  共有エンジン（生成・編集・写真・PDF・txt・認証UI・計測）
 └─ api/
@@ -77,13 +79,21 @@ npx serve .        # または python -m http.server
   - 見るべきファネルは 2 本：**`generate_start` → `generate_success`**（生成成功率＝離脱ポイントの特定）と、**`limit_reached` → `signup_complete`**（上限到達＝登録意欲が最も高い瞬間を分母にした登録率）。
 - **転換導線**：全ツールページのフォーム先頭に「例を入れてみる」（`CareerAI.fillExample(formId, EXAMPLE)`）。`EXAMPLE` のキーは各ページの `data-field` と一致していないと**無言で無視される**ため、`test-seo-lp.mjs` がキー一致・必須項目充足・chip 選択肢の実在まで検証する。`index.html` はさらに HERO 直下に「入力例 → 生成結果例」を置き、出力フォーマットを先に見せる（框内の `【 】` は「捏造しない」方針の可視化）。
 - **CLS 対策**：ナビの認証欄はログアウト時（ログイン 1 ボタン）とログイン時（マイページ ＋ ログアウト）で幅が変わり、`Auth.me()` の応答時にナビ全体が横にずれる。`.auth-area` に `min-width: 10.25rem` を予約して消している（狭い画面ではナビ高さを優先して解除）。
-- この一群の回帰テスト：`node test-seo-lp.mjs`（107 項目・ネットワーク不要）
+- この一群の回帰テスト：`node test-seo-lp.mjs`（128 項目・ネットワーク不要）
+
+## 「不捏造」エンジン（gBizINFO ＋ プロンプト）
+- **企業研究（gBizINFO v2）**：企業名から経済産業省の法人情報 REST API を引き、業種・事業概要・資本金・従業員数・特許・補助金・認定・職場情報を prompt に注入する。トークンは `GBIZ_API_TOKEN`（未設定なら自動でスキップ）。手順は [GBIZ_SETUP.md](./GBIZ_SETUP.md)。
+- ⚠️ **2026-09-21 に修正した重大バグ**：検索 URL を `GBIZ_BASE + "/?name=…"`（**末尾スラッシュ付き**）にしていたため、ルートに一致せず**トークンが正しくても必ず HTTP 500** が返り、`companyContextUsed` が常に false だった。しかも失敗がログに出ず無言で `null` を返す実装だったため、**機能が全滅していても誰も気づけない**状態が続いていた。正しい形は `GBIZ_BASE + "?name=…"`。
+  - 切り分け方：**401=ルート有り（認証層に到達）/ 500=ルート未マッチ**。存在しないダミールート `/zzz` が 500 を返すのと同じ挙動になるので、パスの誤りはこれで一発で判る。curl で試すと Windows の schannel が TLS 再ネゴシエーションで本文を取りこぼすため、**Node の fetch で確認する**こと。
+- **失敗を必ず観測できる形にした**：`gbizGet()` は `{ok, status, error, data}` を返し、失敗時は `console.error("[gbiz][FAIL] …")` に URL と上流ステータスを残す。リクエストごとに `console.log("[gbiz] {…}")` を出し、レスポンスにも `gbiz`（`{configured, ok, step, status, error, hits, corporateNumber}`）を載せるので、**本番に curl 1 回で現在の状態を確認できる**。異常ではないケース（法人データに該当なし＝`search-empty`、トークン未設定＝`no-token`）は FAIL ログにしない。
+- **捏造禁止ルール**：`api/generate.js` の `NO_FABRICATION_RULES` に一本化し、**構造化契約（`buildPrompt`）と旧契約（`messages`）の両方に前置**する。片方だけだとツールによって捏造の有無が変わる（実際 `index.html` 以外の 4 ツールは旧契約を通っており、この規則が一切効いていなかった）。特に「企業のミッション・理念・スローガンを `「」` 付きで引用しない」「企業情報に無い数値を書かない」「文字数を自己申告しない」を明文化している（プロンプトに書いただけでは足りないので、実測で検証する）。
+- 回帰テスト：`node test-p1-baseline.mjs`（133 項目・ネットワーク不要）。gBizINFO のスタブが**実測した壊れ方（末尾スラッシュ＝500）を再現する**ので、同じ改修をするとテストが落ちる。ハンドラを実際に走らせて `companyContextUsed`・`notice`・`gbiz` の診断値まで確認する。
 
 ## 次の拡張（クラスタ深化）
 - 各ツールの「職種別」サブページ（例：`/shinsotsu/eigyo.html`）で長尾を取りに行く
   - ※ 新規サイトの第一優先は**既存 5 ページの転換率**。programmatic SEO はその後。
 - 手引きの更なる充実（滞在時間・E-E-A-T）。FAQ は構造化データまで完了
-- 企業名の入力時リアルタイム候補（gBizINFO）。現状は生成時にサーバ側で自動補完するため、
-  社名を誤っても生成自体は成功し【 】が残るだけ。「入力を止めない」導線は
+- 企業名の入力時リアルタイム候補（gBizINFO）。現状は生成時にサーバ側で自動取得するため、
+  社名を誤ると法人データに当たらず【 】が残る。入力中の候補は
   **計測で離脱ポイントが判明してから**着手する
 - 無料回数 → クレジット課金、または有料就活サービスへの誘導

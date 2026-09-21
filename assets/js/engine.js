@@ -185,7 +185,7 @@ window.CareerAI = (function () {
       if (data.companyContextUsed) {
         setStatus("公開情報から抽出しました（要確認）。そのまま編集してください。" + rem, "ok");
       } else if (data.missingExperience) {
-        setStatus("入力が足りない箇所は【 】で空缺を残しました。ご自身の言葉で埋めてください。" + rem, "warn");
+        setStatus("入力が足りない箇所は【 】のまま残しました。ご自身の言葉で埋めてください。" + rem, "warn");
       } else if (data.mock) {
         setStatus("※デモ出力です（APIキー未設定のためテンプレート表示）。本番では実際の AI が生成されます。" + rem, "warn");
       } else {

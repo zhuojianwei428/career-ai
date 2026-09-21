@@ -74,7 +74,7 @@
             <input type="text" data-field="職種" placeholder="例：マーケティング、ITエンジニア">
           </div>
           <div class="field">
-            <label>志望企業名 <span class="hint">（任意）</span></label>
+            <label>志望企業名 <span class="hint">（必須）</span></label>
             <input type="text" data-field="企業名" placeholder="例：株式会社○○">
           </div>
         </div>
@@ -83,6 +83,7 @@
           <textarea data-field="経験・キーワード" placeholder="例：前職でブランド売上を前年比130%に伸長。データ分析と企画を担当。"></textarea>
         </div>
         <button id="gen-btn" type="submit" class="btn block">職務経歴書を生成する</button>
+        <p class="hint sub2">入力内容の取り扱いは<a href="/privacy.html">個人情報の取り扱い</a>をご確認ください。</p>
       </form>
 
       <p id="status" class="muted" style="min-height:1.2em"></p>
@@ -130,6 +131,7 @@
       <a href="/jiko-pr.html">自己PR</a>
       <a href="/rirekisho.html">履歴書</a>
       <a href="/mensetsu.html">面接対策</a>
+      <a href="/privacy.html">個人情報の取り扱い</a>
     </nav>
   </div>
 </footer>
@@ -148,7 +150,7 @@
   };
   var TOOL_CONFIG = {
     tool: "shokumu",
-    required: ["応募種別", "職種", "経験・キーワード"],
+    required: ["応募種別", "職種", "企業名", "経験・キーワード"],
     system: "あなたは転職市場で評価される職務経歴書のプロライターです。入力から職歴・実績・志望動機を作成し、実績はできるだけ数値化し、即戦力としての貢献をアピールしてください。",
     buildUser: function (v) {
       return ["種別: " + (v["応募種別"] || ""),

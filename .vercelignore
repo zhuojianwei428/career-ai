@@ -1,0 +1,13 @@
+# Vercel の配信対象から除外する内部ファイル。
+# 目的: 本番サイト(coverletterkit.com)から内部ドキュメント・テストを配信しない。
+#
+# ⚠️ 注意: これは「サイト上で 404 にする」だけで、秘匿を保証するものではない。
+#    このリポジトリ(zhuojianwei428/career-ai)は GitHub 上で public のため、
+#    ここに書いたファイルも GitHub 上では引き続き誰でも読める。
+#    本当に秘匿したい場合はリポジトリを private にするか、ファイルをリポジトリ外へ移すこと。
+
+QWEN_SETUP.md
+GBIZ_SETUP.md
+EMAIL_SETUP.md
+REDIS_SETUP.md
+test-seo-lp.mjs

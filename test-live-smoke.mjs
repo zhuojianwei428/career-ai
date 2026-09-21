@@ -30,7 +30,7 @@ console.log("=== スモークテスト: " + BASE + " ===\n");
 
 // [1] 静的ページが全部 200 で、ナビにログイン導線があること
 console.log("[1] ページ（ナビのログイン欄は JS 生成なので、script 参照があることまで確認）");
-for (const p of ["/", "/jiko-pr.html", "/rirekisho.html", "/shokumu.html", "/mensetsu.html", "/account.html"]) {
+for (const p of ["/", "/jiko-pr.html", "/rirekisho.html", "/shokumu.html", "/mensetsu.html", "/account.html", "/privacy.html"]) {
   const r = await req("GET", p);
   ok(p + " が 200", r.status === 200, r.status);
   ok(p + " に engine.js 参照あり", r.text.indexOf("assets/js/engine.js") !== -1, null);

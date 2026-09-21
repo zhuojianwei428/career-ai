@@ -107,14 +107,14 @@
         <p class="io-out">私が貴社を志望したのは、少人数のチームで企画から運用まで一貫して担当するという開発体制に魅力を感じたからです。大学3年からプログラミングを独学で学び、学園祭の予約管理システムを友人2人と開発しました。私は要件の整理と実装を担当し、100件以上の予約を手作業なしで処理できる仕組みにしました。実際に使う人の声を聞きながら形を変えていく過程に、ものづくりの面白さを感じています。貴社でも<mark class="ph">【入社後に携わりたいプロダクト領域】</mark>の開発に加わり、利用者の課題を解決する仕事に取り組みたいと考えています。</p>
       </div>
     </div>
-    <p class="io-caption">※ 出力フォーマットの例です。実際の文章はご入力内容に応じて生成され、入力に無い情報は【 】として空缺のまま残します（経歴を捏造しない方針）。 <a class="io-cta" href="#gen-form">フォームへ進む →</a></p>
+    <p class="io-caption">※ 出力フォーマットの例です。実際の文章はご入力内容に応じて生成され、入力に無い情報は【 】のまま残します（経歴を捏造しない方針）。 <a class="io-cta" href="#gen-form">フォームへ進む →</a></p>
   </section>
 
   <section class="section">
     <div class="card">
       <div class="promise no-print" role="note">
         <span class="check" aria-hidden="true">✓</span>
-        <span><strong>経歴を捏造しません。</strong>あなたの言葉だけで作ります。企業固有の内容は、ご入力いただいた情報からのみ記述し、足りない箇所は【 】で空缺を残します。</span>
+        <span><strong>経歴・実績は一切捏造しません。</strong>あなたが入力した経験だけを使います。企業固有の内容は、ご入力いただいた企業情報に基づいて記述し、情報が足りない箇所は【 】のまま残します。</span>
       </div>
 
       <form id="gen-form" class="no-print">
@@ -138,7 +138,7 @@
             <input type="text" data-field="職種" placeholder="例：総務・人事、ITエンジニア、経済学部">
           </div>
           <div class="field">
-            <label>志望する企業名 <span class="hint">（任意・あると的確に）</span></label>
+            <label>志望する企業名 <span class="hint">（必須）</span></label>
             <input type="text" data-field="企業名" placeholder="例：株式会社○○">
           </div>
         </div>
@@ -150,8 +150,8 @@
 
         <div class="field">
           <label>募集要項・企業情報 <span class="hint">（任意・あるとより具体的に）</span></label>
-          <textarea data-field="企業情報" class="mono" placeholder="公式採用ページや募集要項のURLを貼ると、御社の事業・技術・課題を抽出して志望動機に反映します。テキストを直接貼ってもOK。空欄でも、上の「企業名」から経済産業省 gBizINFO（政府保有法人データ）を自動補完します。"></textarea>
-          <p class="hint sub2">※ 入力がない場合は、御社固有の内容を【 】で空缺に残します。経歴は絶対に捏造しません。</p>
+          <textarea data-field="企業情報" class="mono" placeholder="公式採用ページや募集要項のURLを貼ると、御社の事業・技術・課題を抽出して志望動機に反映します。テキストを直接貼ってもOK。"></textarea>
+          <p class="hint sub2">※ 入力がない場合は、御社固有の内容を【 】のまま残します。経歴は絶対に捏造しません。</p>
         </div>
 
         <div class="row">
@@ -175,6 +175,7 @@
 
         <button id="gen-btn" type="submit" class="btn block">志望動機を生成する</button>
         <p class="hint sub2" id="limit-note">※ ログイン不要・本日最大2回まで。入力ベースで精密に、そのまま使える志望動機を出力します。</p>
+        <p class="hint sub2">入力内容の取り扱いは<a href="/privacy.html">個人情報の取り扱い</a>をご確認ください。</p>
       </form>
 
       <p id="status" class="muted" style="min-height:1.2em"></p>
@@ -217,6 +218,7 @@
       <a href="/rirekisho.html">履歴書</a>
       <a href="/shokumu.html">職務経歴書</a>
       <a href="/mensetsu.html">面接対策</a>
+      <a href="/privacy.html">個人情報の取り扱い</a>
     </nav>
   </div>
 </footer>

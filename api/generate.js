@@ -57,9 +57,17 @@ function setGenCookie(res, value) {
 }
 
 // ---------- gBizINFO (経済産業省 法人情報 REST API v2) ----------
-// エンドポイント: https://api.info.gbiz.go.jp/hojin/v2/hojin/{法人番号}
+//   検索: https://api.info.gbiz.go.jp/hojin/v2/hojin?name=...     ← 末尾スラッシュを付けない
+//   詳細: https://api.info.gbiz.go.jp/hojin/v2/hojin/{法人番号}
 // 認証ヘッダ: X-hojinInfo-api-token (利用申請で取得したトークンを GBIZ_API_TOKEN に設定)
 // 無 token の場合はこの機能をスキップ（既存ロジックに影響なし）
+//
+// ⚠️ 実測 2026-09-21 — これが「companyContextUsed が常に false」だった真因:
+//   検索を GBIZ_BASE + "/?name=" にすると、末尾スラッシュのせいでルートに一致せず
+//   「トークンが正しくても必ず HTTP 500」が返る。存在しないダミールート /zzz と
+//   完全に同じ応答で切り分けられる（401=ルート有り＝認証層到達 / 500=ルート未マッチ）。
+//   正しい形は GBIZ_BASE + "?name=" 。しかも失敗がログにも出ず無言で null を返していたため
+//   「壊れているのに誰も気づかない」状態が続いていた（＝最悪の失敗モード）。
 const GBIZ_BASE = "https://api.info.gbiz.go.jp/hojin/v2/hojin";
 const GBIZ_TOKEN = process.env.GBIZ_API_TOKEN;
 const JSIC_MAJOR = {
@@ -129,40 +137,70 @@ async function research(companyInfo) {
 }
 
 // ---------- ルートB: gBizINFO 自動取得 ----------
+// 戻り値は { ok, status, error, data }。null を返すと「未設定」と「失敗」が区別できず、
+// 失敗が無言で消える（＝今回の障害が見えなかった原因）。必ず理由を返し、必ずログに残す。
 async function gbizGet(path) {
-  if (!GBIZ_TOKEN) return null;
+  if (!GBIZ_TOKEN) return { ok: false, status: null, error: "no-token", data: null };
   const ctrl = new AbortController();
   const timer = setTimeout(function () { ctrl.abort(); }, 5000);
+  const url = GBIZ_BASE + path;
   try {
-    const r = await fetch(GBIZ_BASE + path, {
+    const r = await fetch(url, {
       signal: ctrl.signal,
       headers: { "X-hojinInfo-api-token": GBIZ_TOKEN }
     });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      let snippet = "";
+      try { snippet = (await r.text()).slice(0, 200).replace(/\s+/g, " "); } catch (e) { /* noop */ }
+      console.error("[gbiz][FAIL] HTTP " + r.status + " " + url + " body=" + snippet);
+      return { ok: false, status: r.status, error: "http-" + r.status, data: null };
+    }
     const j = await r.json();
-    return (j && j["hojin-infos"]) || null;
+    // v2 は { "hojin-infos": [...] } 形式だが、配列直返しの可能性も許容する
+    const list = Array.isArray(j) ? j : ((j && j["hojin-infos"]) || null);
+    return { ok: true, status: r.status, error: null, data: list };
   } catch (e) {
-    return null;
+    console.error("[gbiz][FAIL] fetch " + url + " -> " + ((e && e.name) || "Error") + ": " + ((e && e.message) || e));
+    return { ok: false, status: null, error: (e && e.name) || "fetch-error", data: null };
   } finally {
     clearTimeout(timer);
   }
 }
+// 戻り値は { result, diag }。diag は「壊れたときに気づく」ための観測結果で、
+// レスポンスにも載せて外部から状態を確認できるようにする（ログだけだと誰も見ない）。
 async function gbizResearch(companyName) {
-  if (!GBIZ_TOKEN || !companyName || !companyName.trim()) return null;
+  const diag = { configured: !!GBIZ_TOKEN, ok: false, step: "init", status: null, error: null, hits: 0 };
+  if (!GBIZ_TOKEN) {
+    diag.step = "no-token";
+    diag.error = "GBIZ_API_TOKEN が未設定（Vercel の環境変数を確認）";
+    console.warn("[gbiz][SKIP] " + diag.error);
+    return { result: null, diag: diag };
+  }
+  const q = (companyName || "").trim();
+  if (!q) { diag.step = "empty-name"; return { result: null, diag: diag }; }
   try {
-    const q = companyName.trim();
-    const searchList = await gbizGet("/?name=" + encodeURIComponent(q));
-    if (!searchList || !searchList.length) return null;
-    const list = searchList;
+    // 検索は末尾スラッシュ無し（付けるとルート未マッチで必ず 500 になる）
+    diag.step = "search";
+    const search = await gbizGet("?name=" + encodeURIComponent(q));
+    diag.status = search.status;
+    if (!search.ok) { diag.error = search.error; return { result: null, diag: diag }; }
+    if (!Array.isArray(search.data) || !search.data.length) {
+      diag.step = "search-empty";   // 法人データに無い企業（個人事業主など）は正常系
+      return { result: null, diag: diag };
+    }
+    const list = search.data;
+    diag.hits = list.length;
     const live = list.filter(function (x) { return x.status === "-"; });
     const pool = live.length ? live : list;
     const hit = pool.find(function (x) {
       return x.name && (x.name.indexOf(q) >= 0 || q.indexOf(x.name) >= 0);
     }) || pool[0];
-    const cn = hit.corporate_number;
-    if (!cn) return null;
+    const cn = hit && hit.corporate_number;
+    if (!cn) { diag.step = "no-corporate-number"; return { result: null, diag: diag }; }
+    diag.corporateNumber = cn;
 
-    const [baseArr, patArr, subArr, proArr, certArr, wpArr] = await Promise.all([
+    diag.step = "detail";
+    const [baseRes, patRes, subRes, proRes, certRes, wpRes] = await Promise.all([
       gbizGet("/" + cn),
       gbizGet("/" + cn + "/patent"),
       gbizGet("/" + cn + "/subsidy"),
@@ -170,13 +208,20 @@ async function gbizResearch(companyName) {
       gbizGet("/" + cn + "/certification"),
       gbizGet("/" + cn + "/workplace")
     ]);
-    const base = baseArr && baseArr[0];
-    const patent = patArr && patArr[0];
-    const subsidy = subArr && subArr[0];
-    const procurement = proArr && proArr[0];
-    const cert = certArr && certArr[0];
-    const wp = wpArr && wpArr[0];
-    if (!base) return null;
+    const one = function (r) { return (r && r.ok && r.data && r.data[0]) || null; };
+    const base = one(baseRes);
+    const patent = one(patRes);
+    const subsidy = one(subRes);
+    const procurement = one(proRes);
+    const cert = one(certRes);
+    const wp = one(wpRes);
+    if (!base) {
+      diag.step = "detail-empty";
+      diag.status = baseRes.status;
+      diag.error = "基本情報(/{法人番号})が取得できませんでした";
+      console.error("[gbiz][FAIL] " + diag.error + " cn=" + cn + " status=" + baseRes.status);
+      return { result: null, diag: diag };
+    }
 
     const f = [];
     if (base.name) f.push("法人名: " + base.name);
@@ -214,14 +259,22 @@ async function gbizResearch(companyName) {
       if (b.worker_women_rate != null) parts.push("女性労働者比率" + b.worker_women_rate + "%");
       if (parts.length) f.push("職場情報: " + parts.join("、"));
     }
-    if (!f.length) return null;
+    if (!f.length) { diag.step = "no-facts"; return { result: null, diag: diag }; }
+    diag.ok = true;
+    diag.step = "done";
     return {
-      source: "gbiz",
-      facts: f,
-      note: "経済産業省 gBizINFO（政府保有法人データ）から自動取得。データは更新タイミングにより最新ではない場合があり、最終確認は企業公式サイトで。"
+      result: {
+        source: "gbiz",
+        facts: f,
+        note: "経済産業省 gBizINFO（政府保有法人データ）から自動取得。データは更新タイミングにより最新ではない場合があり、最終確認は企業公式サイトで。"
+      },
+      diag: diag
     };
   } catch (e) {
-    return null; // 失敗時は無視（既存ロジックに影響なし）
+    diag.step = "exception";
+    diag.error = (e && e.message) || String(e);
+    console.error("[gbiz][FAIL] 予期しない例外: " + diag.error);
+    return { result: null, diag: diag };
   }
 }
 
@@ -241,21 +294,38 @@ function mergeContext(ctx, gbiz) {
 }
 
 // ---------- プロンプト構築（不捏造ルール） ----------
+// 捏造禁止ルールは全ツール共通の定数にし、構造化契約(buildPrompt)と旧契約(messages)の
+// 両方に必ず前置する。片方にしか置かないと「ツールによって捏造の有無が変わる」状態になる
+// （実際、index.html 以外の4ツールは旧契約を通っており、この規則が一切効いていなかった）。
+// 特に禁止事項2は実測で再現した失敗（企業情報が空のとき、実在企業のミッションを
+// 「」付きで創作した）に対応する。プロンプトに書くだけでは足りないので、実測で検証する。
+const NO_FABRICATION_RULES =
+`【厳守ルール：経歴・実績・企業情報の捏造禁止】
+0. 与えられた事実だけを書く。書かれていない事実の補完・推測・連想は一切しない。
+1. 企業固有の内容（事業内容・製品・サービス名・技術スタック・具体的な施策・課題・数値・固有名詞）は、「企業情報」に明記されている場合のみ記述する。記載が無いものは絶対に書かない。
+2. 特に禁止：企業のミッション・経営理念・スローガン・キャッチコピー・社風・社訓を推測して書くこと。「」『』で括った企業スローガンの引用は、企業情報にその原文がある場合を除き絶対に書かない（例：「人のための技術」を体現する ← 企業情報にこの語が無ければ書いてはならない）。
+3. 業績・売上・シェア・従業員数・導入技術などの数値も、企業情報に無い限り書かない。
+4. 企業固有の記述が無い部分は、【 】で括ったプレースホルダのまま残す（例：【御社の事業のうち、あなたが関心を持った具体的な取り組み】）。
+5. ユーザーの経験・エピソードが不足している箇所も絶対に捏造せず、【 】の形で残す。【 】の中には「何を書けばよいか」の短い指示だけを書く。
+6. 企業名は必ず含める。ただし企業名以外の企業固有情報は「企業情報」由来のものだけにする。
+7. 公開情報（gBizINFO 等）は「要確認」扱いとし、断定的な言い切りを避ける。
+8. 本文だけを出力する。前置き・後書き・「（文字数：XXX字）」のような自己申告の文字数を書かない（実際の文字数と食い違い、不正確な表示になるため）。`;
+
 function buildPrompt(tool, f, merged) {
-  const label = tool === "jiko-pr" ? "自己PR"
+  const label = (tool === "jiko-pr" || tool === "jiko") ? "自己PR"
     : tool === "rirekisho" ? "履歴書"
     : tool === "shokumu" ? "職務経歴書"
     : tool === "mensetsu" ? "面接対策"
     : "志望動機";
   const system =
 `あなたは日本の採用担当者を納得させる${label}のプロライターです。
-【厳守ルール：経歴・実績の捏造禁止】
-1. 企業固有の内容（事業内容・製品・技術スタック・具体的な課題・数値・固有名詞）は、以下の「企業情報」に記載がある場合のみ記述してください。企業情報にない事実は絶対に創作しないでください。
-2. 企業情報に企業固有の記述がない場合は、その部分を【 】で括ったプレースホルダとして空缺を残してください（例：【ここに御社の事業で関心を持った具体的な取り組みを入力】）。
-3. ユーザーの経験・エピソードが不足している箇所は、絶対に捏造せず【ここにあなたの経験を入力：例：…】の形で埋めてください。
-4. 入力された応募種別・職種・文字数・トーンに従い、結論ファーストで具体的に作成してください。
-5. 必ず「企業名」を含め、その企業にしか通用しない内容（企業研究の成果）を企業情報から抽出して盛り込んでください。
-6. gBizINFO（経済産業省）等の公開情報は「要確認」の扱いとし、最新情報は必ず企業公式サイトで再確認する前提で引用してください。`;
+
+${NO_FABRICATION_RULES}
+
+【出力ルール】
+- 入力された応募種別・職種・文字数・トーンに従い、結論ファーストで具体的に作成する。
+- 指定の文字数目安に収める。
+- 本文のみを出力する。`;
   const ctxBlock = merged && merged.text ? merged.text : "なし";
   const user = [
     "応募種別: " + (f["応募種別"] || ""),
@@ -282,7 +352,7 @@ function mock(tool, f, merged) {
   const ctxSnippet = ctxText ? ctxText.slice(0, 160) : "";
   const ctxLine = ctxSnippet
     ? `（${isGbiz ? "経済産業省 gBizINFO より自動取得" : "公開情報より抽出"}：${ctxSnippet}… — 要確認）`
-    : `（企業情報が未入力のため、${company}固有の内容は【 】で空缺を残します。企業名を入力すれば gBizINFO から自動補完、または公式サイトURL/募集要項を貼るとより具体的になります）`;
+    : `（企業情報が未入力のため、${company}固有の内容は【 】のまま残します。公式サイトの採用ページや募集要項を貼ると、より具体的になります）`;
 
   let body = "";
   const phExp = "【ここにあなたの経験を入力：例：大学のゼミで地域課題をフィールドワークし、チームで調査報告書を作成。その過程で得た工夫を活かしたい】";
@@ -453,13 +523,16 @@ export default async function handler(req, res) {
   if (body && body.fields) {
     const f = body.fields;
     const ctx = await research(f["企業情報"]);          // ルートA: ユーザー貼りURL/テキスト
-    const gbiz = await gbizResearch(f["企業名"]);         // ルートB: gBizINFO 自動取得
-    const merged = mergeContext(ctx, gbiz);
+    const gbizRes = await gbizResearch(f["企業名"]);       // ルートB: gBizINFO 自動取得
+    const merged = mergeContext(ctx, gbizRes.result);
+    // 成功も失敗も必ず残す。旧実装は失敗時に無言で null を返しており、
+    // 機能が全滅していても誰も気づけない（＝最悪の失敗モード）状態だった。
+    console.log("[gbiz] " + JSON.stringify(gbizRes.diag));
     const { system, user } = buildPrompt(body.tool || "shibou", f, merged);
     const key = process.env.OPENAI_API_KEY;
     if (!key) {
       const m = mock(body.tool || "shibou", f, merged);
-      res.status(200).json(Object.assign(m, { remaining: remaining }));
+      res.status(200).json(Object.assign(m, { remaining: remaining, gbiz: gbizRes.diag }));
       return;
     }
     try {
@@ -474,7 +547,7 @@ export default async function handler(req, res) {
           "※すべてのモデルが一時的に利用できませんでした（無料枠枯渇・有料フォールバック qwen3.8-flash も失敗）。しばらく経ってから再度お試しください。";
         m.freeQuotaExhausted = true;
         m.mock = true;
-        res.status(200).json(Object.assign(m, { remaining: remaining }));
+        res.status(200).json(Object.assign(m, { remaining: remaining, gbiz: gbizRes.diag }));
         return;
       }
       await persistRecord(session, body.tool || "shibou", f, result.text);
@@ -486,6 +559,7 @@ export default async function handler(req, res) {
         contextSource: merged.source,
         missingExperience: !(f["経験・キーワード"] || "").trim(),
         notice: merged.note,
+        gbiz: gbizRes.diag,
         remaining: remaining
       });
     } catch (e) {
@@ -495,16 +569,19 @@ export default async function handler(req, res) {
   }
 
   // 旧契約: messages のみ（他ツール互換）
+  // ※ この契約を通るツールにも同じ不捏造ルールを必ず前置する（片方だけに置くと方針が崩れる）
   const messages = (body && body.messages) || [];
   const userText = (messages.filter((m) => m.role === "user").pop() || {}).content || "";
   const system = (messages.find((m) => m.role === "system") || {}).content || "";
+  const hardened = [{ role: "system", content: NO_FABRICATION_RULES + (system ? "\n\n" + system : "") }]
+    .concat(messages.filter(function (m) { return m.role !== "system"; }));
   const key = process.env.OPENAI_API_KEY;
   if (!key) {
     res.status(200).json(Object.assign(legacyMock(system, userText), { remaining: remaining }));
     return;
   }
   try {
-    const result = await generateWithFallback(messages);
+    const result = await generateWithFallback(hardened);
     if (!result) {
       res.status(200).json(Object.assign(legacyMock(system, userText), {
         notice: "※すべてのモデルが一時的に利用できませんでした。",
