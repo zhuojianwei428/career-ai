@@ -79,7 +79,9 @@ export default async function handler(req, res) {
     const ok = await sendVerificationEmail(email, code);
     if (!ok) {
       await delPendingVerification(email);
-      return json(res, 502, { error: "認証メールの送信に失敗しました。しばらく経ってから再度お試しください。" });
+      // 502 は「Vercel 側で関数がクラッシュした」時と区別が付かない（運用者が誤診する）。
+      // 上流（メール送信サービス）が一時的に使えない状態なので 503 を返す。
+      return json(res, 503, { error: "認証メールの送信に失敗しました。しばらく経ってから再度お試しください。" });
     }
     return json(res, 200, { ok: true, needVerify: true, email: email });
   }
@@ -125,7 +127,7 @@ export default async function handler(req, res) {
     const code = newCode();
     await storePendingVerification(email, code, pending.salt, pending.hash);
     const ok = await sendVerificationEmail(email, code);
-    if (!ok) return json(res, 502, { error: "認証メールの再送に失敗しました。" });
+    if (!ok) return json(res, 503, { error: "認証メールの再送に失敗しました。" });
     return json(res, 200, { ok: true, email: email });
   }
 
