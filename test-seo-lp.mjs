@@ -136,8 +136,19 @@ ok(/function fillExample\(formId, data\)/.test(engine), "engine.js に fillExamp
 ok(/fillExample: fillExample,/.test(engine), "fillExample が公開APIに出ている");
 ok(/track: track,/.test(engine), "track が公開APIに出ている");
 ok(/var GA4_ID = "";/.test(engine), "GA4_ID が1か所で管理されている（既定は未設定）");
-ok(/typeof window\.gtag === "function"/.test(engine), "track() が gtag 未読込でも落ちない");
-ok(/addEventListener\("load", initAnalytics\)/.test(engine), "計測の初期化が load 後（LCP/INP を悪化させない）");
+ok(/function primeGtag\(\)/.test(engine), "gtag スタブを同期で用意する primeGtag() がある");
+ok(/typeof window\.gtag !== "function"\) return;/.test(engine), "track() が gtag 未読込でも落ちない（早期 return）");
+// スタブを load まで遅らせると、load 前に起きたイベントが捨てられる。
+// track() 側でも primeGtag() を呼び、ID があるのに未準備という状態を作らない。
+ok(
+  /function track\(name, params\) \{[\s\S]{0,300}?primeGtag\(\);/.test(engine),
+  "track() が送信前に primeGtag() を呼ぶ（load 前のイベントを取りこぼさない）"
+);
+ok(
+  /addEventListener\("load", loadGtagScript\)/.test(engine),
+  "外部スクリプトの読み込みだけを load 後に回している（LCP/INP を悪化させない）"
+);
+ok(!/initAnalytics/.test(engine), "旧 initAnalytics() が残っていない（load 前の取りこぼし経路を消した）");
 
 const events = [...engine.matchAll(/track\("([a-z_]+)"/g)].map((m) => m[1]);
 const EXPECTED_EVENTS = [

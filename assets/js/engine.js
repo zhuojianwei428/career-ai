@@ -15,7 +15,8 @@ window.CareerAI = (function () {
    * 広告向け信号は送らない（匿名 Cookie の上限判定を壊さないため）。
    */
   var GA4_ID = "";
-  var ga4Ready = false;
+  var ga4Primed = false;
+  var ga4ScriptLoaded = false;
 
   function ga4Id() {
     var m = document.querySelector('meta[name="ga4-id"]');
@@ -23,25 +24,40 @@ window.CareerAI = (function () {
     return (v || "").trim();
   }
 
-  function initAnalytics() {
+  /* 同期処理：dataLayer と gtag のスタブだけを用意する（外部スクリプトは読まない）。
+   * これを load まで遅らせると、load より前に起きたイベント
+   * （遅い回線でフォーム送信や例の投入が先に走るケース）が捨てられる。
+   * gtag.js は dataLayer を後から順に再生するので、先に積んでおけば取りこぼさない。
+   * ID が未設定のあいだは何も作らない（ページへの影響ゼロ）。 */
+  function primeGtag() {
+    if (ga4Primed) return;
     var id = ga4Id();
-    if (!id || ga4Ready) return;
-    ga4Ready = true;
+    if (!id) return;
+    ga4Primed = true;
     window.dataLayer = window.dataLayer || [];
-    window.gtag = function () { window.dataLayer.push(arguments); };
-    var s = document.createElement("script");
-    s.async = true;
-    s.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(id);
-    document.head.appendChild(s);
+    if (typeof window.gtag !== "function") {
+      window.gtag = function () { window.dataLayer.push(arguments); };
+    }
     window.gtag("js", new Date());
     window.gtag("config", id, { anonymize_ip: true });
+  }
+
+  // load 後に呼ぶ：重い外部スクリプトの読み込みだけを遅らせる（LCP/INP を悪化させない）
+  function loadGtagScript() {
+    if (!ga4Primed || ga4ScriptLoaded) return;
+    ga4ScriptLoaded = true;
+    var s = document.createElement("script");
+    s.async = true;
+    s.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(ga4Id());
+    document.head.appendChild(s);
   }
 
   // 計測の失敗で生成や登録を止めない（必ず握りつぶす）
   function track(name, params) {
     try {
-      if (!ga4Id()) return;
-      if (typeof window.gtag === "function") window.gtag("event", name, params || {});
+      primeGtag();                       // ID 未設定ならここで return（何も起きない）
+      if (typeof window.gtag !== "function") return;
+      window.gtag("event", name, params || {});
     } catch (e) { /* noop */ }
   }
 
@@ -609,9 +625,10 @@ window.CareerAI = (function () {
   // 生成成功時にログイン中なら記録を保存
   Auth.init(); // 全ページでナビにログインボタンを注入し、状態を取得
 
-  // 計測は初回描画を邪魔しないよう load 後に開始する（LCP/INP を悪化させない）
-  if (document.readyState === "complete") initAnalytics();
-  else window.addEventListener("load", initAnalytics);
+  // 計測：スタブは同期で用意（load 前のイベントを取りこぼさない）、外部スクリプトだけ load 後
+  primeGtag();
+  if (document.readyState === "complete") loadGtagScript();
+  else window.addEventListener("load", loadGtagScript);
 
   return {
     generate: generate,
