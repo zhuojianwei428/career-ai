@@ -146,6 +146,13 @@ function stubFetch(mode) {
       if (mode === "truncated") {
         return jsonRes(200, { choices: [{ finish_reason: "length", message: { content: "これは途中で切れた本文です。" } }] });
       }
+      // 実測で 3 ラウンドの prompt 修正後も逐字で再出現した形（締めの1文に穴が2つ）。
+      // prompt では消せないので、サーバ側で**確定判定**して数を返すようにした（P0-3 の殘留検知）。
+      if (mode === "multihole") {
+        return jsonRes(200, { choices: [{ finish_reason: "stop", message: { content:
+          "トヨタ自動車株式会社を志望します。【経験の場面】で課題を解決した経験があります。"
+          + "トヨタ自動車株式会社では、【事業内容への共感】から、【入社後に携わりたい業務】に取り組みたいです。" } }] });
+      }
       return jsonRes(200, { choices: [{ finish_reason: "stop", message: { content: "ダミー生成文（テスト用）。" } }] });
     }
     throw new Error("unexpected fetch: " + u);
@@ -290,6 +297,20 @@ eq(F.res.code, 200, "F: 200");
 ok(F.res.payload && F.res.payload.truncated === true, "F: truncated=true（黙って「完成」と言わない）");
 ok(/途中で切れた可能性/.test(F.res.payload.notice || ""), "F: notice で切れている可能性を伝える");
 ok(F.errs.some((l) => l.indexOf("[gen][FAIL]") >= 0 && l.indexOf("length") >= 0), "F: finish_reason=length がログに残る");
+
+/* --- ケースG: 同一文に穴が2つ以上（prompt では消せなかった殘留）---
+ * 實測: 「【事業内容への共感】から、【入社後に携わりたい業務】に取り組み、…」が
+ * prompt を3ラウンド改めても**逐字で再出現**した。確率に頼らず確定判定して数を返す。 */
+const G = await runCase("multihole", { GBIZ_API_TOKEN: undefined }, "multihole", { confirmed: false });
+eq(G.res.code, 200, "G: 200");
+eq(G.res.payload && G.res.payload.multiHoleSentences, 1, "G: 同一文に穴2つ以上の文を1件と数える");
+ok(/【経験の場面】で課題を解決した経験があります/.test(G.res.payload.text),
+  "G: 1つだけの文は違反に数えない（取りこぼし/過検出の両方を防ぐ）");
+ok(G.logs.some((l) => l.indexOf("[gen][multi-hole]") >= 0), "G: 殘留を必ずログに殘す（消せないものは、せめて數える）");
+// 穴が1つも無い通常出力は 0（誤検出しない）
+const G0 = await runCase("nohole", { GBIZ_API_TOKEN: undefined }, "ok", { confirmed: false });
+eq(G0.res.payload && G0.res.payload.multiHoleSentences, 0, "G: 穴が無い出力は 0（誤検出しない）");
+ok(!G0.logs.some((l) => l.indexOf("[gen][multi-hole]") >= 0), "G: 0 件のときはログを出さない（ログをノイズで埋めない）");
 
 /* ================= 4. P-1-3 反捏造ルール ================= */
 ok(/【厳守ルール：経歴・実績・企業情報の捏造禁止】/.test(gen), "不捏造ルールの見出しがある");

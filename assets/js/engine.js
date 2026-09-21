@@ -224,23 +224,37 @@ window.CareerAI = (function () {
         had_gap: data.missingExperience ? 1 : 0,
         demo: data.mock ? 1 : 0,
         truncated: data.truncated ? 1 : 0,
-        gaps_left: phLeft
+        gaps_left: phLeft,
+        multi_holes: data.multiHoleSentences || 0
       });
+      // P0-3 の殘留（同一文に穴が2つ以上）。サーバ側の**確定判定**で受け取る。
+      // prompt を 3 ラウンド改めても消えなかった形なので、消せないものをせめて可視化する。
+      // 穴が殘っているときだけ添える（穴が無いのに「同じ文に2つ」と言うのは意味不明）。
+      const mh = data.multiHoleSentences || 0;
+      const mhNote = (mh > 0 && phLeft > 0)
+        ? " ※同じ文に【 】が2つ以上ある箇所が " + mh + " 件あります（1つずつクリックで埋められます）。"
+        : "";
+      let msg, kind = "ok";
       if (data.truncated) {
         // 上限で切れた文をそのまま「完成」と言わない（字数カウンタとも辻褄が合わなくなる）
-        setStatus("生成しましたが、文が途中で切れた可能性があります。もう一度生成するか、文字数の目安を短くしてください。" + rem, "warn");
+        msg = "生成しましたが、文が途中で切れた可能性があります。もう一度生成するか、文字数の目安を短くしてください。";
+        kind = "warn";
       } else if (data.companyContextUsed) {
         // 利用者は P0-0 で既に確認済みなので、「確認が必要」という但し書きを添えると自己矛盾する
-        setStatus("選んだ法人の登録情報を反映しました（確認済み・法人番号つき）。そのまま編集できます。" + rem, "ok");
+        msg = "選んだ法人の登録情報を反映しました（確認済み・法人番号つき）。そのまま編集できます。";
       } else if (phLeft) {
-        setStatus("入力が足りない箇所は【 】のまま残しました（" + phLeft + " 箇所）。クリックするとその場で埋められます。" + rem, "warn");
+        msg = "入力が足りない箇所は【 】のまま残しました（" + phLeft + " 箇所）。クリックするとその場で埋められます。";
+        kind = "warn";
       } else if (data.missingExperience) {
-        setStatus("入力が足りない箇所は【 】のまま残しました。ご自身の言葉で埋めてください。" + rem, "warn");
+        msg = "入力が足りない箇所は【 】のまま残しました。ご自身の言葉で埋めてください。";
+        kind = "warn";
       } else if (data.mock) {
-        setStatus("※デモ出力です（APIキー未設定のためテンプレート表示）。本番では実際の AI が生成されます。" + rem, "warn");
+        msg = "※デモ出力です（APIキー未設定のためテンプレート表示）。本番では実際の AI が生成されます。";
+        kind = "warn";
       } else {
-        setStatus("生成完了。そのまま編集できます。" + rem, "ok");
+        msg = "生成完了。そのまま編集できます。";
       }
+      setStatus(msg + mhNote + rem, kind);
     } catch (e) {
       setStatus("生成に失敗しました：" + e.message, "warn");
       track("generate_error", { tool: config.tool || "custom", message: String(e.message).slice(0, 100) });

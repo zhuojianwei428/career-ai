@@ -310,6 +310,18 @@ ok(/data-fill-ph/.test(eng) && /【 】を埋める（" \+ n \+ "）/.test(eng),
 ok(/createTextNode\(value\)/.test(eng) && /replaceChild\(text, phTarget\)/.test(eng),
   "P0-3: 反映後は mark を外して素のテキストにする（印刷・コピーに装飾が残らない）");
 ok(/mark\.ph \{\n  background: color-mix/.test(css), "P0-3: 穴埋めの強調表示は従来どおり");
+// 同一文に穴が2つ以上（prompt を3ラウンド改めても逐字で再出現した形）への層変え対応。
+// prompt ではなく**サーバ側の確定判定**で数を返し、UI は軽く一言だけ添える。
+ok(/function countMultiHoleSentences\(/.test(gen), "P0-3: 同一文の複数穴をサーバ側で確定判定する");
+ok(/multiHoleSentences: multiHole|multiHoleSentences: multiHoleLegacy/.test(gen),
+  "P0-3: 旧契約・新契約の**両方**のレスポンスに件数を載せる（片方だけだと4ページで見えない）");
+ok(/\[gen\]\[multi-hole\]/.test(gen), "P0-3: 殘留を必ずログに殘す（消せないものは、せめて數える）");
+ok(/multi_holes: data\.multiHoleSentences \|\| 0/.test(eng), "P0-3: 計測にも件数を載せる（改善したかを後から見られる）");
+ok(/同じ文に【 】が2つ以上ある箇所が " \+ mh \+ " 件あります/.test(eng), "P0-3: 利用者に軽く一言添える");
+ok(/\(mh > 0 && phLeft > 0\)/.test(eng),
+  "P0-3: 穴が殘っていないときは出さない（「同じ文に2つ」と言う意味が無くなるため）");
+// notice には入れない（捏造ではなく読みやすさの問題なので、利用者を驚かせない）
+ok(!/truncated\)[^\n]*multiHoleSentences/.test(gen), "P0-3: notice ではなく別フィールドで返す（驚かせない）");
 
 /* ================= 7. P0-4 全文コピー ================= */
 ok(/data-copy-all/.test(eng), "P0-4: 全文コピーのボタンを生成する");

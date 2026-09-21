@@ -312,6 +312,30 @@ function errorAction(status, data) {
   return "fatal";
 }
 
+// 1 つの文に【 】が 2 つ以上ある文を数える（P0-3 の殘留）。
+//
+// 背景: 「穴は1文に1つまで」を prompt に書いても、締めの一文に 2 つ並べる形
+// （「【事業内容への共感】から、【入社後に携わりたい業務】に取り組み、…」）が
+// **同じ文のまま逐字で再出現**した。つまり理解の問題ではなく生成分布の問題で、
+// prompt を足す方向では治らない（3 ラウンド試して改善せず）。
+// 一方この症状は正規表現で**確定判定できる**ので、確率に頼らず検出して可視化する。
+//
+// これは「捏造」ではなく**読みやすさ**の問題なので、notice には出さず別フィールドで返す
+// （利用者を驚かせない。UI 側で軽い一言に使う）。
+function countMultiHoleSentences(text) {
+  if (!text) return 0;
+  const sentences = String(text)
+    .split(/(?<=[。．！？!?])|\n+/)
+    .map(function (s) { return s.trim(); })
+    .filter(Boolean);
+  let n = 0;
+  for (const s of sentences) {
+    const holes = s.match(/【[^】]*】/g);
+    if (holes && holes.length >= 2) n++;
+  }
+  return n;
+}
+
 async function callModel(model, messages) {
   const key = process.env.OPENAI_API_KEY;
   const r = await fetch(BASE_URL + "/chat/completions", {
@@ -463,12 +487,18 @@ export default async function handler(req, res) {
           "※文が途中で切れた可能性があります（出力上限に到達）。もう一度生成するか、文字数の目安を短くしてください。";
       }
       await persistRecord(session, body.tool || "shibou", f, cleaned.text);
+      const multiHole = countMultiHoleSentences(cleaned.text);
+      if (multiHole > 0) {
+        // prompt では消せなかった殘留を**必ず記録する**（消せないものは、せめて数える）
+        console.log("[gen][multi-hole] 同一文に穴が2つ以上の文=" + multiHole + " tool=" + (body.tool || "shibou"));
+      }
       res.status(200).json({
         text: cleaned.text,
         mock: false,
         model: result.model,
         truncated: truncated,
         strippedSelfReport: cleaned.stripped,
+        multiHoleSentences: multiHole,
         companyContextUsed: !!merged.text,
         contextSource: merged.source,
         missingExperience: !(f["経験・キーワード"] || "").trim(),
@@ -506,11 +536,17 @@ export default async function handler(req, res) {
     }
     const cleaned = stripSelfReport(result.text);
     if (cleaned.stripped) console.log("[gen][strip] 自己申告の文字数を除去しました");
+    const multiHoleLegacy = countMultiHoleSentences(cleaned.text);
+    if (multiHoleLegacy > 0) {
+      // 舊契約は出力テンプレートが無く、この症狀が最も出やすい（實測: jiko で 3/4）。
+      console.log("[gen][multi-hole] 同一文に穴が2つ以上の文=" + multiHoleLegacy + " tool=legacy");
+    }
     res.status(200).json({
       text: cleaned.text,
       model: result.model,
       truncated: result.finishReason === "length",
       strippedSelfReport: cleaned.stripped,
+      multiHoleSentences: multiHoleLegacy,
       remaining: remaining
     });
   } catch (e) {
