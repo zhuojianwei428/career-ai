@@ -19,6 +19,25 @@ const FALLBACK_MODELS = (process.env.MODEL_FALLBACK && process.env.MODEL_FALLBAC
     ? [process.env.OPENAI_MODEL.trim()]
     : ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen-flash", "qwen3.8-flash"];
 
+// ログイン中ユーザの1日上限（匿名は下の DAILY_LIMIT=2）。Redis 未設定時は匿名扱い。
+const LOGGED_DAILY = Number(process.env.LOGGED_DAILY_LIMIT) || 10;
+import { kvReady, resolveSession, getDailyUsage, incDailyUsage, saveRecord } from "./_lib/storage.mjs";
+
+// ログイン中のみ、真实生成の記録を保存（失敗しても生成結果には影響させない）
+async function persistRecord(session, tool, f, text) {
+  if (!session || !text) return;
+  try {
+    await saveRecord(session.userId, {
+      tool: tool || "shibou",
+      scene: (f && f["応募種別"]) || "",
+      company: (f && f["企業名"]) || "",
+      len: (f && f["文字数"]) || "",
+      tone: (f && f["トーン"]) || "",
+      text: text
+    });
+  } catch (e) { /* ignore */ }
+}
+
 // ---------- 生成回数制限（ログイン不要・1日2回/人） ----------
 // ブラウザ Cookie(clk_gen = "YYYY-MM-DD:N") で同日カウント。サーバ側で強制するため、全ツールページをまたいでも共有。
 // ※ Cookie 消去で回避可能（ログイン不要・無料という要件とのトレードオフ）。本格運用は IP 制限 / KV ストアが必要。
@@ -395,25 +414,40 @@ export default async function handler(req, res) {
     return;
   }
 
-  // 生成回数制限チェック（ログイン不要・1日2回）。Cookie で同日カウント、超過は 429 でブロック。
+  // 生成回数制限: ログイン中は Redis で1日 LOGGED_DAILY 回、匿名は Cookie で DAILY_LIMIT(2) 回。
   const todayStr = jstDate();
-  const cookieVal = getCookie(req, GEN_COOKIE);
-  let used = 0;
-  if (cookieVal) {
-    const parts = cookieVal.split(":");
-    if (parts[0] === todayStr) used = parseInt(parts[1], 10) || 0;
+  const session = kvReady() ? await resolveSession(req) : null;
+  let isAnon = true, limit, remaining, used = 0;
+  if (session) {
+    isAnon = false;
+    limit = LOGGED_DAILY;
+    used = await getDailyUsage(session.userId, todayStr);
+    if (used >= limit) {
+      res.status(429).json({
+        error: "本日の生成回数上限（ログイン中は1日 " + limit + " 回）に達しました。明日またお試しください。",
+        limitReached: true, remaining: 0, loggedIn: true
+      });
+      return;
+    }
+    await incDailyUsage(session.userId, todayStr);
+    remaining = limit - (used + 1);
+  } else {
+    limit = DAILY_LIMIT;
+    const cookieVal = getCookie(req, GEN_COOKIE);
+    if (cookieVal) {
+      const parts = cookieVal.split(":");
+      if (parts[0] === todayStr) used = parseInt(parts[1], 10) || 0;
+    }
+    if (used >= limit) {
+      res.status(429).json({
+        error: "本日の生成回数上限（1日 " + limit + " 回）に達しました。ログインすると1日 " + LOGGED_DAILY + " 回まで生成できます。",
+        limitReached: true, remaining: 0
+      });
+      return;
+    }
+    setGenCookie(res, todayStr + ":" + (used + 1));
+    remaining = limit - (used + 1);
   }
-  if (used >= DAILY_LIMIT) {
-    res.status(429).json({
-      error: "本日の生成回数上限（1日 " + DAILY_LIMIT + " 回）に達しました。明日またお試しください。",
-      limitReached: true,
-      remaining: 0
-    });
-    return;
-  }
-  const newUsed = used + 1;
-  setGenCookie(res, todayStr + ":" + newUsed);
-  const remaining = DAILY_LIMIT - newUsed;
 
   // 新契約: 構造化入力 + 企業情報取得（ルートA + ルートB）
   if (body && body.fields) {
@@ -443,6 +477,7 @@ export default async function handler(req, res) {
         res.status(200).json(Object.assign(m, { remaining: remaining }));
         return;
       }
+      await persistRecord(session, body.tool || "shibou", f, result.text);
       res.status(200).json({
         text: result.text,
         mock: false,

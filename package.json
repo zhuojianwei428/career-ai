@@ -6,5 +6,8 @@
   "description": "就活AI — 志望動機/自己PR/履歴書/職務経歴書/面接対策 の生成・編集・PDF出力ツール群",
   "scripts": {
     "dev": "npx serve ."
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.39.0"
   }
 }

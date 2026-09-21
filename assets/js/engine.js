@@ -104,6 +104,9 @@ window.CareerAI = (function () {
       result.classList.remove("placeholder");
       makeEditable(result);
       showContextNote(data);
+      if (CareerAI.auth && CareerAI.auth.isLoggedIn() && !data.mock) {
+        CareerAI.auth.saveRecord(config.tool, vals, data.text);
+      }
       const rem = (data.remaining != null) ? "（本日あと " + data.remaining + " 回）" : "";
       if (data.companyContextUsed) {
         setStatus("公開情報から抽出しました（要確認）。そのまま編集してください。" + rem, "ok");
@@ -201,6 +204,211 @@ window.CareerAI = (function () {
     }
   }
 
+  // ---------- 認証 / マイページ（ログイン不要でも動作；Redis 未設定時は login のみ無効） ----------
+  var Auth = (function () {
+    var state = { loggedIn: false, email: null, configured: true };
+    var modal = null;
+
+    async function me() {
+      try {
+        const r = await fetch("/api/auth", { headers: { "Accept": "application/json" } });
+        const d = await r.json();
+        state.loggedIn = !!d.loggedIn;
+        state.email = d.email || null;
+        state.configured = d.configured !== false;
+      } catch (e) {
+        state.configured = false;
+      }
+      renderNav();
+      applyQuotaUI();
+    }
+
+    function renderNav() {
+      const area = document.getElementById("auth-area");
+      if (!area) return;
+      if (state.loggedIn) {
+        area.innerHTML =
+          '<a class="nav-auth-link" href="/account.html">マイページ</a>' +
+          '<button type="button" class="nav-auth-btn ghost" id="auth-logout">ログアウト</button>';
+        const lo = document.getElementById("auth-logout");
+        if (lo) lo.addEventListener("click", logout);
+      } else {
+        area.innerHTML = '<button type="button" class="nav-auth-btn" id="auth-open">ログイン</button>';
+        const o = document.getElementById("auth-open");
+        if (o) o.addEventListener("click", openModal);
+      }
+    }
+
+    function applyQuotaUI() {
+      const note = document.getElementById("limit-note");
+      if (!note) return;
+      if (state.loggedIn) {
+        note.textContent = "ログイン中：1日最大10回まで生成でき、履歴はマイページに保存されます。";
+      } else if (state.configured) {
+        note.textContent = "ログイン不要・本日最大2回まで。ログインすると1日10回まで、かつ生成履歴を保存できます。";
+      } else {
+        note.textContent = "ログイン不要・本日最大2回まで。";
+      }
+    }
+
+    function ensureModal() {
+      if (modal) return;
+      modal = document.createElement("div");
+      modal.className = "auth-modal";
+      modal.hidden = true;
+      modal.innerHTML =
+        '<div class="auth-backdrop" data-close="1"></div>' +
+        '<div class="auth-card" role="dialog" aria-modal="true" aria-label="ログイン / 新規登録">' +
+          '<button type="button" class="auth-x" data-close="1" aria-label="閉じる">×</button>' +
+          '<div class="auth-tabs">' +
+            '<button type="button" class="auth-tab active" data-tab="login">ログイン</button>' +
+            '<button type="button" class="auth-tab" data-tab="register">新規登録</button>' +
+          '</div>' +
+          '<form id="auth-form" class="auth-form" novalidate>' +
+            '<label>メールアドレス<input type="email" id="auth-email" autocomplete="email" placeholder="example@coverletterkit.com"></label>' +
+            '<label>パスワード<input type="password" id="auth-pw" autocomplete="current-password" placeholder="6文字以上"></label>' +
+            '<button type="submit" class="btn block" id="auth-submit">ログイン</button>' +
+            '<p class="auth-err" id="auth-err"></p>' +
+          '</form>' +
+          '<p class="auth-hint">アカウントは生成履歴の保存・照会用です。パスワードはハッシュ保存され、平文は保存されません。</p>' +
+        '</div>';
+      document.body.appendChild(modal);
+      modal.querySelectorAll("[data-close]").forEach(function (el) {
+        el.addEventListener("click", close);
+      });
+      modal.querySelectorAll(".auth-tab").forEach(function (t) {
+        t.addEventListener("click", function () { switchTab(t.getAttribute("data-tab")); });
+      });
+      modal.querySelector("#auth-form").addEventListener("submit", function (e) {
+        e.preventDefault();
+        const tab = modal.querySelector(".auth-tab.active").getAttribute("data-tab");
+        if (tab === "register") doRegister(); else doLogin();
+      });
+    }
+
+    let currentTab = "login";
+    function switchTab(tab) {
+      currentTab = tab;
+      modal.querySelectorAll(".auth-tab").forEach(function (t) {
+        t.classList.toggle("active", t.getAttribute("data-tab") === tab);
+      });
+      modal.querySelector("#auth-submit").textContent = tab === "register" ? "新規登録してログイン" : "ログイン";
+      modal.querySelector("#auth-err").textContent = "";
+      const pw = modal.querySelector("#auth-pw");
+      pw.setAttribute("autocomplete", tab === "register" ? "new-password" : "current-password");
+    }
+    function openModal() {
+      ensureModal();
+      modal.hidden = false;
+      switchTab("login");
+      setTimeout(function () { const e = modal.querySelector("#auth-email"); if (e) e.focus(); }, 30);
+    }
+    function close() { if (modal) modal.hidden = true; }
+
+    function setErr(msg) { const e = modal && modal.querySelector("#auth-err"); if (e) e.textContent = msg || ""; }
+
+    async function doLogin() {
+      const email = modal.querySelector("#auth-email").value.trim();
+      const pw = modal.querySelector("#auth-pw").value;
+      setErr("");
+      const btn = modal.querySelector("#auth-submit");
+      btn.disabled = true;
+      try {
+        const r = await fetch("/api/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "login", email: email, password: pw })
+        });
+        const d = await r.json();
+        if (!r.ok || !d.loggedIn) { setErr(d.error || "ログインに失敗しました。"); return; }
+        state.loggedIn = true; state.email = d.email;
+        close(); renderNav(); applyQuotaUI();
+        if (typeof onAuthChange === "function") onAuthChange();
+      } catch (e) {
+        setErr("通信エラーが発生しました。");
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function doRegister() {
+      const email = modal.querySelector("#auth-email").value.trim();
+      const pw = modal.querySelector("#auth-pw").value;
+      setErr("");
+      const btn = modal.querySelector("#auth-submit");
+      btn.disabled = true;
+      try {
+        const r = await fetch("/api/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "register", email: email, password: pw })
+        });
+        const d = await r.json();
+        if (!r.ok || !d.loggedIn) { setErr(d.error || "登録に失敗しました。"); return; }
+        state.loggedIn = true; state.email = d.email;
+        close(); renderNav(); applyQuotaUI();
+        if (typeof onAuthChange === "function") onAuthChange();
+      } catch (e) {
+        setErr("通信エラーが発生しました。");
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function logout() {
+      try {
+        await fetch("/api/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "logout" })
+        });
+      } catch (e) {}
+      state.loggedIn = false; state.email = null;
+      renderNav(); applyQuotaUI();
+      if (typeof onAuthChange === "function") onAuthChange();
+    }
+
+    // 生成成功時に呼ぶ（ログイン中のみ記録を保存；失敗は無視）
+    function saveRecord(tool, vals, text) {
+      if (!state.loggedIn || !text) return;
+      fetch("/api/records", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tool: tool,
+          scene: (vals && vals["応募種別"]) || "",
+          company: (vals && vals["企業名"]) || "",
+          len: (vals && vals["文字数"]) || "",
+          tone: (vals && vals["トーン"]) || "",
+          text: text
+        })
+      }).catch(function () {});
+    }
+
+    function isLoggedIn() { return state.loggedIn; }
+
+    // ナビに auth-area を注入（全ページ共通）
+    function init() {
+      const navInner = document.querySelector(".nav-inner");
+      const toggle = document.getElementById("theme-toggle");
+      if (navInner && !document.getElementById("auth-area")) {
+        const span = document.createElement("span");
+        span.id = "auth-area";
+        span.className = "auth-area";
+        if (toggle && toggle.parentNode === navInner) {
+          navInner.insertBefore(span, toggle);
+        } else {
+          navInner.appendChild(span);
+        }
+      }
+      me();
+    }
+
+    return { init: init, me: me, login: doLogin, register: doRegister, logout: logout, saveRecord: saveRecord, isLoggedIn: isLoggedIn, openModal: openModal };
+  })();
+
+  // 生成成功時にログイン中なら記録を保存
+  Auth.init(); // 全ページでナビにログインボタンを注入し、状態を取得
   return {
     generate: generate,
     makeEditable: makeEditable,
@@ -210,6 +418,7 @@ window.CareerAI = (function () {
     chipGroup: chipGroup,
     collect: collect,
     initTheme: initTheme,
-    applyTheme: applyTheme
+    applyTheme: applyTheme,
+    auth: Auth
   };
 })();
