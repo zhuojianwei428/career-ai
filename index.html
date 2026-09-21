@@ -20,6 +20,38 @@
 </script>
 
 <link rel="stylesheet" href="/assets/css/style.css">
+
+<!-- 構造化データ：このページに実際に表示している「よくある質問」と1文字も違わない内容のみを宣言する。
+     Google は 2023-08 以降 FAQ のリッチリザルトを政府・医療の権威サイトに限定しているため、
+     ここでの主目的は SERP 装飾ではなく、AI Overviews / LLM に Q&A 構造を正しく渡すこと。 -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "無料で使えますか？",
+      "acceptedAnswer": { "@type": "Answer", "text": "はい、無料でご利用いただけます。登録も不要です。" }
+    },
+    {
+      "@type": "Question",
+      "name": "作成した志望動機はそのまま使えますか？",
+      "acceptedAnswer": { "@type": "Answer", "text": "そのまま使うことも、この画面でクリックしてご自身の言葉に編集することもできます。" }
+    },
+    {
+      "@type": "Question",
+      "name": "PDFで保存できますか？",
+      "acceptedAnswer": { "@type": "Answer", "text": "「PDF出力」ボタンでブラウザの印刷からPDFとして保存できます。履歴書との併用も可能です。" }
+    },
+    {
+      "@type": "Question",
+      "name": "新卒・転職・バイト・進学すべて対応？",
+      "acceptedAnswer": { "@type": "Answer", "text": "はい、応募種別を選ぶだけでそれぞれに最適な構成で生成します。" }
+    }
+  ]
+}
+</script>
 </head>
 <body>
 <a class="skip-link" href="#main">本文へスキップ</a>
@@ -55,6 +87,29 @@
   </section>
 
   <section class="section">
+    <h2>入力例 → 生成結果例</h2>
+    <p class="muted">何を入れれば何が出るかを、先に確認できます。</p>
+    <div class="io-grid">
+      <div class="io-col">
+        <span class="io-head">入力例</span>
+        <dl class="io-list">
+          <dt>応募種別</dt><dd>新卒</dd>
+          <dt>職種</dt><dd>ITエンジニア（Web開発）</dd>
+          <dt>企業名</dt><dd>株式会社ミライテック</dd>
+          <dt>経験</dt><dd>学園祭の予約管理システムを友人2人と開発。100件以上の予約を手作業なしで処理できるようにした。</dd>
+          <dt>企業情報</dt><dd>募集要項より「少人数チームで企画から運用まで担当」</dd>
+        </dl>
+      </div>
+      <div class="io-arrow" aria-hidden="true">→</div>
+      <div class="io-col">
+        <span class="io-head">生成結果例（抜粋）</span>
+        <p class="io-out">私が貴社を志望したのは、少人数のチームで企画から運用まで一貫して担当するという開発体制に魅力を感じたからです。大学3年からプログラミングを独学で学び、学園祭の予約管理システムを友人2人と開発しました。私は要件の整理と実装を担当し、100件以上の予約を手作業なしで処理できる仕組みにしました。実際に使う人の声を聞きながら形を変えていく過程に、ものづくりの面白さを感じています。貴社でも<mark class="ph">【入社後に携わりたいプロダクト領域】</mark>の開発に加わり、利用者の課題を解決する仕事に取り組みたいと考えています。</p>
+      </div>
+    </div>
+    <p class="io-caption">※ 出力フォーマットの例です。実際の文章はご入力内容に応じて生成され、入力に無い情報は【 】として空缺のまま残します（経歴を捏造しない方針）。 <a class="io-cta" href="#gen-form">フォームへ進む →</a></p>
+  </section>
+
+  <section class="section">
     <div class="card">
       <div class="promise no-print" role="note">
         <span class="check" aria-hidden="true">✓</span>
@@ -62,6 +117,10 @@
       </div>
 
       <form id="gen-form" class="no-print">
+        <div class="example-bar">
+          <button type="button" class="btn example mini" onclick="CareerAI.fillExample('gen-form', EXAMPLE)">例を入れてみる</button>
+          <span class="note">何を書けばいいか迷ったら、まず例を入れてから書き換えてください。</span>
+        </div>
         <div class="field">
           <label>応募種別</label>
           <div class="chips">
@@ -165,6 +224,16 @@
 <script>CareerAI.initTheme();</script>
 <script>
   CareerAI.chipGroup("scene"); CareerAI.chipGroup("len"); CareerAI.chipGroup("tone");
+  // 「例を入れてみる」で流し込む仮データ。実在企業ではなく、書き換え前提の例。
+  var EXAMPLE = {
+    "応募種別": "新卒",
+    "職種": "ITエンジニア（Web開発）",
+    "企業名": "株式会社ミライテック",
+    "経験・キーワード": "大学3年からプログラミングを独学。学園祭の予約管理システムを友人2人と開発し、100件以上の予約を手作業なしで処理できるようにした。使う人の声を聞いて改善を重ねた。",
+    "企業情報": "自社Webサービスを開発。募集要項に「少人数チームで企画から運用まで担当」「ユーザーの声を一次情報で聞くことを重視」と記載。",
+    "文字数": "300〜500字",
+    "トーン": "フォーマル"
+  };
   var TOOL_CONFIG = {
     tool: "shibou",
     structured: true,

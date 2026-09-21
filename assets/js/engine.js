@@ -7,6 +7,44 @@
 window.CareerAI = (function () {
   "use strict";
 
+  /* ---------- Analytics（GA4） ----------
+   * 計測 ID はこの1か所だけで管理する（各 HTML に散らすと更新漏れするため）。
+   * 空文字のあいだは gtag.js を読み込まず、track() は何もしない（ページへの影響ゼロ）。
+   * <meta name="ga4-id" content="G-XXXXXXX"> を置けばそちらが優先される。
+   * 目的は「どのページで、どこまで進んで、どこで離脱したか」の把握のみ。
+   * 広告向け信号は送らない（匿名 Cookie の上限判定を壊さないため）。
+   */
+  var GA4_ID = "";
+  var ga4Ready = false;
+
+  function ga4Id() {
+    var m = document.querySelector('meta[name="ga4-id"]');
+    var v = (m && m.getAttribute("content")) || GA4_ID;
+    return (v || "").trim();
+  }
+
+  function initAnalytics() {
+    var id = ga4Id();
+    if (!id || ga4Ready) return;
+    ga4Ready = true;
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function () { window.dataLayer.push(arguments); };
+    var s = document.createElement("script");
+    s.async = true;
+    s.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(id);
+    document.head.appendChild(s);
+    window.gtag("js", new Date());
+    window.gtag("config", id, { anonymize_ip: true });
+  }
+
+  // 計測の失敗で生成や登録を止めない（必ず握りつぶす）
+  function track(name, params) {
+    try {
+      if (!ga4Id()) return;
+      if (typeof window.gtag === "function") window.gtag("event", name, params || {});
+    } catch (e) { /* noop */ }
+  }
+
   function collect(form) {
     const vals = {};
     const nodes = form.querySelectorAll("[data-field]");
@@ -84,6 +122,15 @@ window.CareerAI = (function () {
 
     if (btn) { btn.disabled = true; btn.dataset.label = btn.innerHTML; btn.innerHTML = '<span class="spinner"></span> 生成中…'; }
     setStatus("AI が精密に作成しています…");
+    // ファネル計測：入力完了して実際に生成を押した地点
+    track("generate_start", {
+      tool: config.tool || "custom",
+      scene: vals["応募種別"] || "",
+      length: vals["文字数"] || "",
+      tone: vals["トーン"] || "",
+      has_company: vals["企業名"] ? 1 : 0,
+      has_jd: vals["企業情報"] ? 1 : 0
+    });
 
     try {
       const res = await fetch("/api/generate", {
@@ -95,6 +142,11 @@ window.CareerAI = (function () {
       if (res.status === 429 && data && data.limitReached) {
         setStatus(data.error || "本日の生成上限に達しました。", "warn");
         if (btn) { btn.disabled = true; btn.innerHTML = "本日の上限に達しました"; }
+        // 上限到達＝登録の動機が最も高い瞬間。ここを分母に登録率を見る。
+        track("limit_reached", {
+          tool: config.tool || "custom",
+          logged_in: (Auth && Auth.isLoggedIn && Auth.isLoggedIn()) ? 1 : 0
+        });
         return;
       }
       if (!res.ok || !data.text) {
@@ -107,6 +159,13 @@ window.CareerAI = (function () {
       // 履歴の保存はサーバ側（/api/generate 内で session がある場合のみ）で行う。
       // ここで再度 POST すると1回の生成で履歴が2件重複するため、クライアントからは保存しない。
       const rem = (data.remaining != null) ? "（本日あと " + data.remaining + " 回）" : "";
+      // ファネル計測：生成が実際に成果物を返した地点（＝このページの主目的の達成）
+      track("generate_success", {
+        tool: config.tool || "custom",
+        company_context: data.companyContextUsed ? 1 : 0,
+        had_gap: data.missingExperience ? 1 : 0,
+        demo: data.mock ? 1 : 0
+      });
       if (data.companyContextUsed) {
         setStatus("公開情報から抽出しました（要確認）。そのまま編集してください。" + rem, "ok");
       } else if (data.missingExperience) {
@@ -118,6 +177,7 @@ window.CareerAI = (function () {
       }
     } catch (e) {
       setStatus("生成に失敗しました：" + e.message, "warn");
+      track("generate_error", { tool: config.tool || "custom", message: String(e.message).slice(0, 100) });
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.label || "生成する"; }
     }
@@ -145,6 +205,7 @@ window.CareerAI = (function () {
 
   function exportPDF() {
     setStatus("");
+    track("pdf_export", {});
     window.print();
   }
 
@@ -158,6 +219,30 @@ window.CareerAI = (function () {
     a.download = "shibou-ai-output.txt";
     a.click();
     URL.revokeObjectURL(a.href);
+    track("text_export", {});
+  }
+
+  /* 例文の一括投入。
+   * 「何を書けばいいか分からない」で離脱する層の入口を作る（試用のハードルを下げる）。
+   * 投入するのはあくまで例であって、生成結果ではありません。ユーザーが上書きする前提。 */
+  function fillExample(formId, data) {
+    const form = document.getElementById(formId);
+    if (!form || !data) return;
+    Object.keys(data).forEach(function (key) {
+      const want = data[key];
+      form.querySelectorAll('[data-field="' + key + '"]').forEach(function (n) {
+        if (n.matches("input, textarea, select")) {
+          n.value = want;
+        } else if (n.classList.contains("chip")) {
+          const val = n.getAttribute("data-value") || n.textContent.trim();
+          n.setAttribute("aria-pressed", val === want ? "true" : "false");
+        }
+      });
+    });
+    setStatus("入力例を入れました。このまま生成するか、ご自身の内容に書き換えてください。", "ok");
+    track("example_fill", { form: formId });
+    const first = form.querySelector("textarea, input[type=text]");
+    if (first && first.focus) first.focus();
   }
 
   // chip toggle (単一選択)
@@ -382,6 +467,7 @@ window.CareerAI = (function () {
         pendingEmail = null;
         state.loggedIn = true; state.email = d.email;
         close(); renderNav(); applyQuotaUI();
+        track("login_success", {});
         if (typeof onAuthChange === "function") onAuthChange();
       } catch (e) {
         setErr("通信エラーが発生しました。");
@@ -406,7 +492,7 @@ window.CareerAI = (function () {
         });
         const d = await r.json();
         if (!r.ok) { setErr((d && d.error) || "登録に失敗しました。"); return; }
-        if (d.needVerify) { pendingEmail = email; showVerify(email); return; }
+        if (d.needVerify) { pendingEmail = email; showVerify(email); track("signup_code_sent", {}); return; }
         if (d.loggedIn) {
           pendingEmail = null;
           state.loggedIn = true; state.email = d.email;
@@ -452,6 +538,7 @@ window.CareerAI = (function () {
         pendingEmail = null;
         state.loggedIn = true; state.email = d.email;
         close(); renderNav(); applyQuotaUI();
+        track("signup_complete", {});
         if (typeof onAuthChange === "function") onAuthChange();
       } catch (e) {
         errEl.textContent = "通信エラーが発生しました。";
@@ -492,6 +579,7 @@ window.CareerAI = (function () {
       } catch (e) {}
       state.loggedIn = false; state.email = null; pendingEmail = null;
       renderNav(); applyQuotaUI();
+      track("logout", {});
       if (typeof onAuthChange === "function") onAuthChange();
     }
 
@@ -514,6 +602,11 @@ window.CareerAI = (function () {
 
   // 生成成功時にログイン中なら記録を保存
   Auth.init(); // 全ページでナビにログインボタンを注入し、状態を取得
+
+  // 計測は初回描画を邪魔しないよう load 後に開始する（LCP/INP を悪化させない）
+  if (document.readyState === "complete") initAnalytics();
+  else window.addEventListener("load", initAnalytics);
+
   return {
     generate: generate,
     makeEditable: makeEditable,
@@ -521,9 +614,11 @@ window.CareerAI = (function () {
     exportPDF: exportPDF,
     exportText: exportText,
     chipGroup: chipGroup,
+    fillExample: fillExample,
     collect: collect,
     initTheme: initTheme,
     applyTheme: applyTheme,
+    track: track,
     auth: Auth
   };
 })();

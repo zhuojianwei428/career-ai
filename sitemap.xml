@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- changefreq / priority は Google が無視するため記載しない（loc と lastmod のみ） -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.coverletterkit.com/</loc>
+    <lastmod>2026-09-21</lastmod>
+  </url>
+  <url>
+    <loc>https://www.coverletterkit.com/jiko-pr.html</loc>
+    <lastmod>2026-09-21</lastmod>
+  </url>
+  <url>
+    <loc>https://www.coverletterkit.com/rirekisho.html</loc>
+    <lastmod>2026-09-21</lastmod>
+  </url>
+  <url>
+    <loc>https://www.coverletterkit.com/shokumu.html</loc>
+    <lastmod>2026-09-21</lastmod>
+  </url>
+  <url>
+    <loc>https://www.coverletterkit.com/mensetsu.html</loc>
+    <lastmod>2026-09-21</lastmod>
+  </url>
+</urlset>

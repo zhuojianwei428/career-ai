@@ -358,7 +358,11 @@ mark.ph {
 }
 
 /* ---------- 認証 / マイページ ---------- */
-.auth-area { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.5rem; }
+/* CLS 対策：ログイン状態で中身の幅が変わる（ログイン1ボタン ⇄ マイページ+ログアウト）ため、
+   幅を先に予約しておく。予約しないと Auth.me() の応答時にナビ全体が横にずれる。
+   モバイルはナビが折り返すので、行占有を固定して幅の影響を消す。 */
+.auth-area { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.5rem; justify-content: flex-end; min-width: 10.25rem; }
+@media (max-width: 35rem) { .auth-area { min-width: 0; } }
 .nav-auth-btn {
   font: inherit; font-size: 0.85rem; cursor: pointer;
   border: 1px solid var(--brand); background: var(--brand); color: var(--on-brand);
@@ -416,4 +420,30 @@ mark.ph {
 .record-meta { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.78rem; color: var(--ink-faint); margin-bottom: 0.4rem; flex-wrap: wrap; }
 .record-time { white-space: nowrap; }
 .record-text { white-space: pre-wrap; font-size: 0.9rem; line-height: 1.6; color: var(--ink); border: none; background: var(--surface-2); padding: 0.6rem; border-radius: 6px; }
+
+/* ---------- 入力例 → 生成結果例（首屏の結果予期） ---------- */
+.io-grid { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.875rem; align-items: stretch; }
+.io-col { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); padding: 0.875rem; }
+.io-head {
+  display: inline-block; font-size: 0.75rem; font-weight: 700; color: var(--brand-ink);
+  background: var(--brand-soft); padding: 0.2rem 0.65rem; border-radius: var(--radius-pill); margin-bottom: 0.625rem;
+}
+.io-list { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 0.7rem; font-size: 0.8125rem; }
+.io-list dt { color: var(--ink-faint); white-space: nowrap; }
+.io-list dd { color: var(--ink); }
+.io-out { font-size: 0.8125rem; line-height: 1.9; color: var(--ink-soft); }
+.io-arrow { display: flex; align-items: center; justify-content: center; color: var(--brand); font-weight: 700; }
+@media (max-width: 48rem) {
+  .io-grid { grid-template-columns: 1fr; }
+  .io-arrow { transform: rotate(90deg); }
+}
+.io-caption { font-size: 0.75rem; color: var(--ink-faint); margin-top: 0.625rem; }
+/* 例を見せるとフォームが折り返し以下に落ちるため、その場から直接飛べる導線を置く */
+.io-cta { font-weight: 700; color: var(--brand-ink); white-space: nowrap; }
+
+/* ---------- 入力例を入れるボタン ---------- */
+.example-bar { display: flex; align-items: center; gap: 0.625rem; flex-wrap: wrap; margin: 0.25rem 0 0.875rem; }
+.example-bar .note { font-size: 0.75rem; color: var(--ink-faint); }
+.btn.example { background: var(--brand-soft); color: var(--brand-ink); border: 1px dashed var(--brand); box-shadow: none; }
+.btn.example:hover { background: var(--brand); color: var(--on-brand); border-style: solid; transform: translateY(-1px); }
 

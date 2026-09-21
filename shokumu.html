@@ -56,6 +56,10 @@
   <section class="section">
     <div class="card">
       <form id="gen-form" class="no-print">
+        <div class="example-bar">
+          <button type="button" class="btn example mini" onclick="CareerAI.fillExample('gen-form', EXAMPLE)">例を入れてみる</button>
+          <span class="note">何を書けばいいか迷ったら、まず例を入れてから書き換えてください。</span>
+        </div>
         <div class="field">
           <label>応募種別</label>
           <div class="chips">
@@ -134,7 +138,15 @@
 <script>
   CareerAI.chipGroup("scene");
   CareerAI.setupPhoto("photo-input", "photo-slot");
+  // 「例を入れてみる」で流し込む仮データ。実在企業ではなく、書き換え前提の例。
+  var EXAMPLE = {
+    "応募種別": "転職",
+    "職種": "Webマーケティング",
+    "企業名": "株式会社ミライテック",
+    "経験・キーワード": "前職でオウンドメディアの運用を3年担当。月間PVを8万から22万へ拡大。キーワード選定から記事設計まで一貫して担い、問い合わせ数を月40件から95件に増やした。"
+  };
   var TOOL_CONFIG = {
+    tool: "shokumu",
     required: ["応募種別", "職種", "経験・キーワード"],
     system: "あなたは転職市場で評価される職務経歴書のプロライターです。入力から職歴・実績・志望動機を作成し、実績はできるだけ数値化し、即戦力としての貢献をアピールしてください。",
     buildUser: function (v) {

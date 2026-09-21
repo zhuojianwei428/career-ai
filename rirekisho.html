@@ -56,6 +56,10 @@
   <section class="section">
     <div class="card">
       <form id="gen-form" class="no-print">
+        <div class="example-bar">
+          <button type="button" class="btn example mini" onclick="CareerAI.fillExample('gen-form', EXAMPLE)">例を入れてみる</button>
+          <span class="note">何を書けばいいか迷ったら、まず例を入れてから書き換えてください。</span>
+        </div>
         <div class="field">
           <label>応募種別</label>
           <div class="chips">
@@ -134,7 +138,15 @@
 <script>
   CareerAI.chipGroup("scene");
   CareerAI.setupPhoto("photo-input", "photo-slot");
+  // 「例を入れてみる」で流し込む仮データ。実在企業ではなく、書き換え前提の例。
+  var EXAMPLE = {
+    "応募種別": "転職",
+    "職種": "経理",
+    "企業名": "株式会社ミライテック",
+    "経験・キーワード": "前職で経理を4年担当。月次決算の締め作業を5営業日から3営業日に短縮した。請求書処理のチェック表を自作し、二重計上を年間0件にした。日商簿記2級取得。"
+  };
   var TOOL_CONFIG = {
+    tool: "rirekisho",
     required: ["応募種別", "職種", "経験・キーワード"],
     system: "あなたは日本の採用担当者が読んで納得する履歴書のプロライターです。入力から、学歴・職歴・志望動機・自己PRを含む履歴書の本文を作成してください。志望動機は結論ファースト・具体的内容にし、自己PRは強みとエピソードを含めてください。",
     buildUser: function (v) {

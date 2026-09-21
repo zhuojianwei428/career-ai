@@ -11,9 +11,16 @@ career-ai/
 ├─ rirekisho.html     履歴書（写真枠付き）
 ├─ shokumu.html       職務経歴書（写真枠付き）
 ├─ mensetsu.html      面接対策
+├─ account.html       マイページ（生成履歴）
+├─ robots.txt         Sitemap 宣言 ＋ /api/ と /account.html を除外
+├─ sitemap.xml        インデックス対象 5 ページ（loc と lastmod のみ）
 ├─ assets/css/style.css
-├─ assets/js/engine.js  共有エンジン（生成・編集・写真・PDF・txt）
-└─ api/generate.js       Vercel Serverless 生成関数（OpenAI 互換）
+├─ assets/js/engine.js  共有エンジン（生成・編集・写真・PDF・txt・認証UI・計測）
+└─ api/
+   ├─ generate.js       生成（OpenAI 互換 ＋ gBizINFO 企業研究）
+   ├─ auth.js           登録 / メール認証 / ログイン / セッション
+   ├─ records.js        生成履歴の取得
+   └─ _lib/             storage.mjs（Redis ＋ scrypt）/ email.mjs（Resend）
 ```
 
 ## 機能
@@ -62,7 +69,21 @@ npx serve .        # または python -m http.server
 - **Redis 障害時も 500 を返さない**：`_lib/storage.mjs` が全メソッドをラップし例外を投げずに null を返すため、ログイン中でも自動で「匿名（Cookie 2回/日）」に降級して生成は継続。障害検知後 30 秒は呼び出しを止めるサーキットブレーカー付きで、復旧は自動。新規登録のみ 503 で止める（保存できていないコードをメールで送らない）。詳細は [REDIS_SETUP.md](./REDIS_SETUP.md)。
 - 容量の目安：Free プラン（月50万コマンド）でヘビーユーザー約250人 / 軽いユーザー約800人。**匿名アクセスは Redis を一切使わない**（Cookie 制限）ため 0 コマンド。上限到達時は Upstash コンソールから Pay As You Go（$0.2/10万コマンド、予算上限設定可）へ切替のみで、コード変更もデータ移行も不要。詳細は [REDIS_SETUP.md](./REDIS_SETUP.md)。
 
+## SEO ・計測 ・転換導線
+- **sitemap / robots**：`/robots.txt` と `/sitemap.xml` はリポジトリ直下の静的ファイル（Vercel がそのまま配信）。**GSC に登録するのは `https://www.coverletterkit.com/sitemap.xml`**。`account.html` はログイン必須なので sitemap に含めず robots でも除外。`changefreq` / `priority` は Google が無視するため書いていない。
+- **構造化データ（FAQPage）**：`index.html` の head に JSON-LD を 1 ブロック。Google は **2023-08 以降 FAQ リッチリザルトを政府・医療の権威サイトに限定**しているため、ここでの目的は SERP 装飾ではなく **AI Overviews / LLM に Q&A 構造を正しく渡すこと**（HowTo は完全廃止済みなので使わない）。Google の要件どおり **構造化データの内容はページ上の可視 FAQ と完全一致**させる必要があるので、両者の乖離を `test-seo-lp.mjs` が毎回照合する（片方だけ直すと即 FAIL）。
+- **計測（GA4）**：有効化は `assets/js/engine.js` 冒頭の **`var GA4_ID = "";` に `G-XXXXXXXXXX` を入れるだけ**（1 か所で全ページに効く。`<meta name="ga4-id" content="...">` を置けばそちらが優先）。未設定のあいだは gtag.js を読み込まず `track()` は何もしないので、ID が無くてもページに影響しない。計測の初期化は `load` 後なので LCP / INP を悪化させない。IP は匿名化して送信。
+- 発火イベント（11）：`generate_start` / `generate_success` / `generate_error` / `limit_reached` / `example_fill` / `pdf_export` / `text_export` / `signup_code_sent` / `signup_complete` / `login_success` / `logout`
+  - 見るべきファネルは 2 本：**`generate_start` → `generate_success`**（生成成功率＝離脱ポイントの特定）と、**`limit_reached` → `signup_complete`**（上限到達＝登録意欲が最も高い瞬間を分母にした登録率）。
+- **転換導線**：全ツールページのフォーム先頭に「例を入れてみる」（`CareerAI.fillExample(formId, EXAMPLE)`）。`EXAMPLE` のキーは各ページの `data-field` と一致していないと**無言で無視される**ため、`test-seo-lp.mjs` がキー一致・必須項目充足・chip 選択肢の実在まで検証する。`index.html` はさらに HERO 直下に「入力例 → 生成結果例」を置き、出力フォーマットを先に見せる（框内の `【 】` は「捏造しない」方針の可視化）。
+- **CLS 対策**：ナビの認証欄はログアウト時（ログイン 1 ボタン）とログイン時（マイページ ＋ ログアウト）で幅が変わり、`Auth.me()` の応答時にナビ全体が横にずれる。`.auth-area` に `min-width: 10.25rem` を予約して消している（狭い画面ではナビ高さを優先して解除）。
+- この一群の回帰テスト：`node test-seo-lp.mjs`（107 項目・ネットワーク不要）
+
 ## 次の拡張（クラスタ深化）
 - 各ツールの「職種別」サブページ（例：`/shinsotsu/eigyo.html`）で長尾を取りに行く
-- 手引き/FAQ の更なる充実（滞在時間・E-E-A-T）
+  - ※ 新規サイトの第一優先は**既存 5 ページの転換率**。programmatic SEO はその後。
+- 手引きの更なる充実（滞在時間・E-E-A-T）。FAQ は構造化データまで完了
+- 企業名の入力時リアルタイム候補（gBizINFO）。現状は生成時にサーバ側で自動補完するため、
+  社名を誤っても生成自体は成功し【 】が残るだけ。「入力を止めない」導線は
+  **計測で離脱ポイントが判明してから**着手する
 - 無料回数 → クレジット課金、または有料就活サービスへの誘導

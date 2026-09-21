@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# ログイン必須のマイページと、JSON しか返さない API はクロール対象外
+Disallow: /account.html
+Disallow: /api/
+
+Sitemap: https://www.coverletterkit.com/sitemap.xml

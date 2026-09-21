@@ -56,6 +56,10 @@
   <section class="section">
     <div class="card">
       <form id="gen-form" class="no-print">
+        <div class="example-bar">
+          <button type="button" class="btn example mini" onclick="CareerAI.fillExample('gen-form', EXAMPLE)">例を入れてみる</button>
+          <span class="note">何を書けばいいか迷ったら、まず例を入れてから書き換えてください。</span>
+        </div>
         <div class="field">
           <label>対策の種類</label>
           <div class="chips">
@@ -118,7 +122,15 @@
 <script>CareerAI.initTheme();</script>
 <script>
   CareerAI.chipGroup("kind");
+  // 「例を入れてみる」で流し込む仮データ。実在企業ではなく、書き換え前提の例。
+  var EXAMPLE = {
+    "対策種類": "自己紹介",
+    "職種": "ITエンジニア",
+    "企業名": "株式会社ミライテック",
+    "経験・キーワード": "大学3年からプログラミングを独学。学園祭の予約管理システムを友人2人と開発し、100件以上の予約を手作業なしで処理できるようにした。運用しながら改善を重ねた経験がある。"
+  };
   var TOOL_CONFIG = {
+    tool: "mensetsu",
     required: ["対策種類", "職種", "経験・キーワード"],
     system: "あなたは就活・転職の面接対策のプロコーチです。入力から、指定された種類（想定質問の回答構成／逆質問／自己紹介）を作成してください。結論ファースト、具体性、一貫性を重視してください。",
     buildUser: function (v) {

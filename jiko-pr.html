@@ -56,6 +56,10 @@
   <section class="section">
     <div class="card">
       <form id="gen-form" class="no-print">
+        <div class="example-bar">
+          <button type="button" class="btn example mini" onclick="CareerAI.fillExample('gen-form', EXAMPLE)">例を入れてみる</button>
+          <span class="note">何を書けばいいか迷ったら、まず例を入れてから書き換えてください。</span>
+        </div>
         <div class="field">
           <label>応募種別</label>
           <div class="chips">
@@ -135,7 +139,17 @@
 <script>CareerAI.initTheme();</script>
 <script>
   CareerAI.chipGroup("scene"); CareerAI.chipGroup("len"); CareerAI.chipGroup("tone");
+  // 「例を入れてみる」で流し込む仮データ。実在企業ではなく、書き換え前提の例。
+  var EXAMPLE = {
+    "応募種別": "転職",
+    "職種": "法人営業",
+    "企業名": "株式会社ミライテック",
+    "経験・キーワード": "前職の法人営業で担当顧客を30社から52社に拡大。既存顧客の課題をヒアリングして提案内容を組み替え、年間売上を1.4倍にした。断られた理由を記録して次回提案に反映する習慣を3年続けた。",
+    "文字数": "300〜500字",
+    "トーン": "フォーマル"
+  };
   var TOOL_CONFIG = {
+    tool: "jiko",
     required: ["応募種別", "職種", "経験・キーワード"],
     system: "あなたは採用担当者が評価する自己PRのプロライターです。入力から、応募職種に合った強みと、それを証明するエピソードを構成してください。可能な限り数値で裏付け、結論ファーストで書いてください。",
     buildUser: function (v) {
