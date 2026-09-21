@@ -594,6 +594,11 @@ window.CareerAI = (function () {
     // ナビのログイン欄。コンテナの生成は ensureAuthArea() に一本化する
     //（以前は init() にも同じ生成コードがあり二重管理になっていた）
     function init() {
+      // 先に器だけ作る。renderNav() は me() の fetch 応答後に呼ばれるため、
+      // ここで作らないと「ナビに空きが無い状態 → 応答後に要素が出現」となり、
+      // ナビのリンク列が丸ごと横にずれる（実測 186px、CLS 0.0033）。
+      // 器を先に置けば min-width の予約が初回描画から効き、ずれが起きない。
+      ensureAuthArea();
       me();
     }
 

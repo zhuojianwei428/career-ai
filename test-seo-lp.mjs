@@ -151,6 +151,12 @@ for (const e of EXPECTED_EVENTS) ok(events.includes(e), "計測イベント " + 
 /* ---------- 6. CLS 対策（ナビの幅予約） ---------- */
 const css = read("assets/css/style.css");
 ok(/\.auth-area \{[^}]*min-width:\s*10\.25rem/.test(css), ".auth-area が幅を予約している（CLS 対策）");
+// 幅を予約しても、器そのものが fetch 応答後に作られると初回描画では空きが無く、
+// 要素が出現した瞬間にナビのリンク列が丸ごとずれる（実測 186px）。器は同期的に作る。
+ok(
+  /function init\(\) \{[\s\S]{0,400}?ensureAuthArea\(\);\s*\n\s*me\(\);/.test(engine),
+  "init() が fetch を待たずに auth-area の器を同期的に作る"
+);
 // 幅予約は狭い画面では解除する。予約したまま行を占有させると
 // 折り返すナビが 1 段増えて、モバイルの常時ナビ高さが 188px→236px に膨らむ（実測）。
 ok(
