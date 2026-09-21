@@ -97,7 +97,9 @@ if (faqLd) {
   // Google の要件：構造化データに書いた内容は必ずページ上に見えていること
   eq(declared, visible, "JSON-LD の Q/A が可視 FAQ と完全一致（順序・文言とも）");
   ok(declared.every((d) => d.q && d.a), "すべての Q/A が空でない");
-  ok(declared.every((d) => (d.a.match(/【[^】]*】/) || []).length === 0), "回答にプレースホルダ【】が残っていない");
+  // 「【◯◯】が回答に残る」のは、未記入の穴が SERP に出る事故なので許さない。
+  // ただし空の【 】は「足りない箇所は【 】のまま残ります」という説明での言及なので許容する。
+  ok(declared.every((d) => (d.a.match(/【[^】\s]+】/) || []).length === 0), "回答に未記入のプレースホルダ【◯◯】が残っていない（空の【 】は説明の言及として許容）");
   ok(!/aggregateRating|reviewCount|ratingValue/.test(ldBlocks[0]), "検証していない評価値を宣言していない");
 }
 
@@ -156,7 +158,9 @@ const events = [...engine.matchAll(/track\("([a-z_]+)"/g)].map((m) => m[1]);
 const EXPECTED_EVENTS = [
   "generate_start", "limit_reached", "generate_success", "generate_error",
   "pdf_export", "text_export", "example_fill",
-  "login_success", "signup_code_sent", "signup_complete", "logout"
+  "login_success", "signup_code_sent", "signup_complete", "logout",
+  // P0 で追加：コピーはこのサイト最大の転換点、ph_fill は「空欄を埋めた」＝価値到達の証拠
+  "copy_all", "ph_fill", "hint_tag_insert"
 ];
 for (const e of events) ok(EXPECTED_EVENTS.includes(e), "計測イベント名 " + e + " が既知の一覧にある");
 for (const e of EXPECTED_EVENTS) ok(events.includes(e), "計測イベント " + e + " が実際に発火する場所がある");

@@ -1,15 +1,19 @@
 // Vercel Serverless Function — AI 生成エンドポイント
 // 不捏造(証拠駆動)エンジン:
 //   1) ユーザーが貼った JD/企業情報(URL またはテキスト)を取得・抽出（ルートA）
-//   2) 企業名から gBizINFO(経済産業省 REST API v2) で政府保有法人データを自動取得（ルートB）
-//   3) 企業固有の内容は取得・入力された事実のみから記述、不明は【】占位符
+//   2) 企業名は api/company.js で候補を出し、利用者が「確認して選んだ」法人番号のみを使う（ルートB）
+//      ※ 法人名で自動的に1社へ決め打ちしない。同名の別法人が実在するため（P0-0）。
+//   3) 企業固有の内容は取得・入力された事実のみから記述、不明は【】の短いラベルで残す
 //   4) 入力不足時は骨架+占位符を返し、経歴を捏造しない
 // OpenAI 互換 API を呼ぶ。環境変数 OPENAI_API_KEY が無い場合は日本語デモ(同ルール適用)。
 // 無料モデルを順に試し、無料枠枯渇時は自動で次のモデルへ。末尾の qwen3.8-flash は「有料フォールバック」：
 // アカウントにチャージ残高があれば、無料枠枯渇後も自動で継続生成（サイトは止まらない）。
 
 const BASE_URL = process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
-const MAX_TOKENS = 1600;
+// 日本語 500〜800 字は本文だけで概ね 1600 トークン超、かつ qwen3.8-flash は reasoning モデルで
+// 思考分も同じ枠を食う。1600 だと「長め」選択時に文が途中で切れる（＝字数表示と矛盾する）。
+// max_tokens は上限であって課金量ではないので、余裕を持たせる。
+const MAX_TOKENS = 3000;
 // 無料モデル順次フォールバック（百炼の各モデルは独立して100万トークンの無料枠あり）。
 // 末尾の qwen3.8-flash は「有料フォールバック」＝チャージ残高があれば無料枠枯渇後も継続生成。
 // qwen3.8-flash は reasoning（思考）モデル。更快/更省にしたい場合は callModel の body に enable_thinking:false を追加。
@@ -22,6 +26,9 @@ const FALLBACK_MODELS = (process.env.MODEL_FALLBACK && process.env.MODEL_FALLBAC
 // ログイン中ユーザの1日上限（匿名は下の DAILY_LIMIT=2）。Redis 未設定時は匿名扱い。
 const LOGGED_DAILY = Number(process.env.LOGGED_DAILY_LIMIT) || 5;
 import { kvReady, resolveSession, getDailyUsage, incDailyUsage, saveRecord } from "./_lib/storage.mjs";
+// gBizINFO は共有ライブラリに一本化（api/company.js と同じ実装を使う）。
+// URL 結合を2箇所に書くと、片方だけ直して片方が壊れる（末尾スラッシュ事故の再来）を防ぐ。
+import { gbizConfigured, gbizDetail, isCorporateNumber } from "./_lib/gbiz.mjs";
 
 // ログイン中のみ、真实生成の記録を保存（失敗しても生成結果には影響させない）
 async function persistRecord(session, tool, f, text) {
@@ -55,29 +62,6 @@ function getCookie(req, name) {
 function setGenCookie(res, value) {
   res.setHeader("Set-Cookie", GEN_COOKIE + "=" + encodeURIComponent(value) + "; Path=/; Max-Age=86400; SameSite=Lax");
 }
-
-// ---------- gBizINFO (経済産業省 法人情報 REST API v2) ----------
-//   検索: https://api.info.gbiz.go.jp/hojin/v2/hojin?name=...     ← 末尾スラッシュを付けない
-//   詳細: https://api.info.gbiz.go.jp/hojin/v2/hojin/{法人番号}
-// 認証ヘッダ: X-hojinInfo-api-token (利用申請で取得したトークンを GBIZ_API_TOKEN に設定)
-// 無 token の場合はこの機能をスキップ（既存ロジックに影響なし）
-//
-// ⚠️ 実測 2026-09-21 — これが「companyContextUsed が常に false」だった真因:
-//   検索を GBIZ_BASE + "/?name=" にすると、末尾スラッシュのせいでルートに一致せず
-//   「トークンが正しくても必ず HTTP 500」が返る。存在しないダミールート /zzz と
-//   完全に同じ応答で切り分けられる（401=ルート有り＝認証層到達 / 500=ルート未マッチ）。
-//   正しい形は GBIZ_BASE + "?name=" 。しかも失敗がログにも出ず無言で null を返していたため
-//   「壊れているのに誰も気づかない」状態が続いていた（＝最悪の失敗モード）。
-const GBIZ_BASE = "https://api.info.gbiz.go.jp/hojin/v2/hojin";
-const GBIZ_TOKEN = process.env.GBIZ_API_TOKEN;
-const JSIC_MAJOR = {
-  A: "農業・林業", B: "漁業", C: "鉱業・採石業", D: "建設業", E: "製造業",
-  F: "電気・ガス・熱供給・水道業", G: "情報通信業", H: "運輸業・郵便業",
-  I: "卸売業・小売業", J: "金融業・保険業", K: "不動産業・物品賃貸業",
-  L: "学術研究・専門・技術サービス業", M: "宿泊業・飲食サービス業",
-  N: "生活関連サービス業・娯楽業", O: "教育・学習支援業", P: "医療・福祉",
-  Q: "複合サービス事業", R: "サービス業（他に分類されないもの）", S: "公務・その他"
-};
 
 // ---------- ルートA: ユーザーが貼った URL/テキスト ----------
 function isPrivateUrl(u) {
@@ -136,162 +120,12 @@ async function research(companyInfo) {
   }
 }
 
-// ---------- ルートB: gBizINFO 自動取得 ----------
-// 戻り値は { ok, status, error, data }。null を返すと「未設定」と「失敗」が区別できず、
-// 失敗が無言で消える（＝今回の障害が見えなかった原因）。必ず理由を返し、必ずログに残す。
-async function gbizGet(path) {
-  if (!GBIZ_TOKEN) return { ok: false, status: null, error: "no-token", data: null };
-  const ctrl = new AbortController();
-  const timer = setTimeout(function () { ctrl.abort(); }, 5000);
-  const url = GBIZ_BASE + path;
-  try {
-    const r = await fetch(url, {
-      signal: ctrl.signal,
-      headers: { "X-hojinInfo-api-token": GBIZ_TOKEN }
-    });
-    if (!r.ok) {
-      let snippet = "";
-      try { snippet = (await r.text()).slice(0, 200).replace(/\s+/g, " "); } catch (e) { /* noop */ }
-      console.error("[gbiz][FAIL] HTTP " + r.status + " " + url + " body=" + snippet);
-      return { ok: false, status: r.status, error: "http-" + r.status, data: null };
-    }
-    const j = await r.json();
-    // v2 は { "hojin-infos": [...] } 形式だが、配列直返しの可能性も許容する
-    const list = Array.isArray(j) ? j : ((j && j["hojin-infos"]) || null);
-    return { ok: true, status: r.status, error: null, data: list };
-  } catch (e) {
-    console.error("[gbiz][FAIL] fetch " + url + " -> " + ((e && e.name) || "Error") + ": " + ((e && e.message) || e));
-    return { ok: false, status: null, error: (e && e.name) || "fetch-error", data: null };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-// 戻り値は { result, diag }。diag は「壊れたときに気づく」ための観測結果で、
-// レスポンスにも載せて外部から状態を確認できるようにする（ログだけだと誰も見ない）。
-async function gbizResearch(companyName) {
-  const diag = { configured: !!GBIZ_TOKEN, ok: false, step: "init", status: null, error: null, hits: 0 };
-  if (!GBIZ_TOKEN) {
-    diag.step = "no-token";
-    diag.error = "GBIZ_API_TOKEN が未設定（Vercel の環境変数を確認）";
-    console.warn("[gbiz][SKIP] " + diag.error);
-    return { result: null, diag: diag };
-  }
-  const q = (companyName || "").trim();
-  if (!q) { diag.step = "empty-name"; return { result: null, diag: diag }; }
-  try {
-    // 検索は末尾スラッシュ無し（付けるとルート未マッチで必ず 500 になる）
-    diag.step = "search";
-    const search = await gbizGet("?name=" + encodeURIComponent(q));
-    diag.status = search.status;
-    if (!search.ok) { diag.error = search.error; return { result: null, diag: diag }; }
-    if (!Array.isArray(search.data) || !search.data.length) {
-      diag.step = "search-empty";   // 法人データに無い企業（個人事業主など）は正常系
-      return { result: null, diag: diag };
-    }
-    const list = search.data;
-    diag.hits = list.length;
-    const live = list.filter(function (x) { return x.status === "-"; });
-    const pool = live.length ? live : list;
-    const hit = pool.find(function (x) {
-      return x.name && (x.name.indexOf(q) >= 0 || q.indexOf(x.name) >= 0);
-    }) || pool[0];
-    const cn = hit && hit.corporate_number;
-    if (!cn) { diag.step = "no-corporate-number"; return { result: null, diag: diag }; }
-    diag.corporateNumber = cn;
-
-    diag.step = "detail";
-    const [baseRes, patRes, subRes, proRes, certRes, wpRes] = await Promise.all([
-      gbizGet("/" + cn),
-      gbizGet("/" + cn + "/patent"),
-      gbizGet("/" + cn + "/subsidy"),
-      gbizGet("/" + cn + "/procurement"),
-      gbizGet("/" + cn + "/certification"),
-      gbizGet("/" + cn + "/workplace")
-    ]);
-    const one = function (r) { return (r && r.ok && r.data && r.data[0]) || null; };
-    const base = one(baseRes);
-    const patent = one(patRes);
-    const subsidy = one(subRes);
-    const procurement = one(proRes);
-    const cert = one(certRes);
-    const wp = one(wpRes);
-    if (!base) {
-      diag.step = "detail-empty";
-      diag.status = baseRes.status;
-      diag.error = "基本情報(/{法人番号})が取得できませんでした";
-      console.error("[gbiz][FAIL] " + diag.error + " cn=" + cn + " status=" + baseRes.status);
-      return { result: null, diag: diag };
-    }
-
-    const f = [];
-    if (base.name) f.push("法人名: " + base.name);
-    if (base.industry && base.industry[0]) f.push("業種(JSIC): " + (JSIC_MAJOR[base.industry[0]] || base.industry[0]));
-    if (base.business_summary) f.push("事業概要: " + base.business_summary);
-    if (typeof base.capital_stock === "number") f.push("資本金: " + base.capital_stock.toLocaleString("ja-JP") + "円");
-    if (typeof base.employee_number === "number") f.push("従業員数: " + base.employee_number.toLocaleString("ja-JP") + "人");
-    if (base.location) f.push("本店所在地: " + base.location);
-    if (base.date_of_establishment) f.push("設立: " + base.date_of_establishment);
-    if (base.representative_name) f.push("代表者: " + base.representative_name);
-    if (base.company_url) f.push("企業URL: " + base.company_url);
-    if (patent && Array.isArray(patent.patent) && patent.patent.length) {
-      f.push("特許: " + patent.patent.length + "件（最新登録番号 " + (patent.patent[0].registration_number || "—") + "）");
-    }
-    if (subsidy && Array.isArray(subsidy.subsidy) && subsidy.subsidy.length) {
-      f.push("補助金受給: " + subsidy.subsidy.length + "件（例: " + (subsidy.subsidy[0].title || "—") + "）");
-    }
-    if (procurement && Array.isArray(procurement.procurement) && procurement.procurement.length) {
-      f.push("官公庁調達実績: " + procurement.procurement.length + "件（例: " + (procurement.procurement[0].title || "—") + "）");
-    }
-    if (cert && Array.isArray(cert.certification) && cert.certification.length) {
-      const titles = cert.certification.slice(0, 3).map(function (c) {
-        return c.title + (c.government_departments ? "（" + c.government_departments + "）" : "");
-      }).join("、");
-      f.push("認定・表彰: " + cert.certification.length + "件（" + titles + "）");
-    }
-    if (wp && wp.workplace_info && wp.workplace_info.base_infos) {
-      const b = wp.workplace_info.base_infos;
-      const parts = [];
-      if (b.average_continuous_service_years_Male != null) {
-        parts.push("平均継続勤務年数 男" + b.average_continuous_service_years_Male + "/女" + (b.average_continuous_service_years_Female != null ? b.average_continuous_service_years_Female : "—") + "年");
-      }
-      if (b.average_age_Male != null) parts.push("平均年齢" + b.average_age_Male + "歳");
-      if (b.average_overtime_work_hours != null) parts.push("月平均所定外労働時間" + b.average_overtime_work_hours + "h");
-      if (b.worker_women_rate != null) parts.push("女性労働者比率" + b.worker_women_rate + "%");
-      if (parts.length) f.push("職場情報: " + parts.join("、"));
-    }
-    if (!f.length) { diag.step = "no-facts"; return { result: null, diag: diag }; }
-    diag.ok = true;
-    diag.step = "done";
-    // どの法人に当たったかを明示する。同名の別法人（例：よくある社名）に当たると
-    // 「事実だが別会社の情報」が志望動機に混ざるため、利用者が自分で気づけるようにする。
-    const ident = [
-      base.name ? "法人名: " + base.name : null,
-      base.location ? "所在地: " + base.location : null,
-      "法人番号: " + cn
-    ].filter(Boolean).join("／");
-    return {
-      result: {
-        source: "gbiz",
-        facts: f,
-        matched: { name: base.name || null, location: base.location || null, corporateNumber: cn },
-        note: "経済産業省 gBizINFO（政府保有法人データ）から自動取得（" + ident + "）。同名の別法人が登録されている場合があるため、入力した企業名と一致しているかご確認ください。データは更新タイミングにより最新ではない場合があり、最終確認は企業公式サイトで。出典：gBizINFO"
-      },
-      diag: diag
-    };
-  } catch (e) {
-    diag.step = "exception";
-    diag.error = (e && e.message) || String(e);
-    console.error("[gbiz][FAIL] 予期しない例外: " + diag.error);
-    return { result: null, diag: diag };
-  }
-}
-
-// ルートA と ルートB を統合
+// ルートA（貼り付け/URL）と ルートB（確認済み gBizINFO）を統合
 function mergeContext(ctx, gbiz) {
   if (ctx && ctx.context) {
     let text = ctx.context;
     if (gbiz && gbiz.facts.length) {
-      text += "\n\n【gBizINFO 登録情報（自動取得）】\n" + gbiz.facts.join("\n");
+      text += "\n\n【gBizINFO 登録情報（確認のうえ選択）】\n" + gbiz.facts.join("\n");
     }
     return { text: text, source: ctx.source || "gbiz", note: ctx.note || (gbiz ? gbiz.note : null) };
   }
@@ -301,12 +135,41 @@ function mergeContext(ctx, gbiz) {
   return { text: null, source: null, note: null };
 }
 
+// ---------- 出力の後始末 ----------
+// モデルは指示しても文末に「（文字数：698字）」を混ぜる（自己申告の数字も実際と食い違う）。
+// 本文に残ると (a) 字数カウンタと矛盾して壊れて見える (b) 全文コピー/PDF でそのまま相手に渡る。
+// 文末に現れた自己申告だけを落とす（本文中の数値や「698字」という語自体は消さない）。
+const SELF_REPORT_PATTERNS = [
+  /[（(]\s*(?:文字数|字数)\s*[：:]?\s*(?:約)?\s*[\d,，]+\s*字(?:\s*程度)?\s*[）)]\s*$/,
+  /[（(]\s*(?:約)?\s*[\d,，]+\s*字(?:\s*程度)?\s*[）)]\s*$/,
+  /[（(]\s*(?:約)?\s*[\d,，]+\s*(?:文字|chars?)\s*[）)]\s*$/,
+  /[※*＊]?\s*(?:文字数|字数)\s*[：:]\s*(?:約)?\s*[\d,，]+\s*字(?:\s*程度)?\s*$/,
+  /[。．.]?\s*[（(]\s*[^）)]{0,16}(?:文字数|字数)[^）)]{0,16}[）)]\s*$/
+];
+function stripSelfReport(text) {
+  let t = String(text || "").trim();
+  let stripped = false;
+  for (let i = 0; i < 4; i++) {
+    let hit = false;
+    for (const re of SELF_REPORT_PATTERNS) {
+      const next = t.replace(re, "").trim();
+      if (next !== t) { t = next; hit = true; stripped = true; break; }
+    }
+    if (!hit) break;
+  }
+  return { text: t, stripped: stripped };
+}
+
 // ---------- プロンプト構築（不捏造ルール） ----------
 // 捏造禁止ルールは全ツール共通の定数にし、構造化契約(buildPrompt)と旧契約(messages)の
 // 両方に必ず前置する。片方にしか置かないと「ツールによって捏造の有無が変わる」状態になる
 // （実際、index.html 以外の4ツールは旧契約を通っており、この規則が一切効いていなかった）。
-// 特に禁止事項2は実測で再現した失敗（企業情報が空のとき、実在企業のミッションを
-// 「」付きで創作した）に対応する。プロンプトに書くだけでは足りないので、実測で検証する。
+//
+// ⚠️ 実測で分かったこと（2026-09-21）: 抽象的に「捏造するな」と書いても守られない。
+//   実効的なレバーは「鉤括弧「」『』を一切出すな」だった。偽の理念・スローガンは
+//   引用符で括ることで初めて「会社がそう言っている」体裁になるため、引用符を禁じると成立しない。
+// さらに 2026-09-21 追記: 【 】の中に長い指示文（60字超の「例：…」）を書かせると
+//   穴埋めUIが成立しない。ラベルは短く、10〜14文字までに制限する。
 const NO_FABRICATION_RULES =
 `【厳守ルール：経歴・実績・企業情報の捏造禁止】
 0. 与えられた事実だけを書く。書かれていない事実の補完・推測・連想は一切しない。
@@ -314,8 +177,8 @@ const NO_FABRICATION_RULES =
 2. 特に禁止：企業のミッション・経営理念・スローガン・キャッチコピー・社風・社訓・開発哲学・価値観を推測して書くこと。企業情報に書かれていない「その企業らしさ」の要約（◯◯を起点とした開発哲学／◯◯を大切にする社風／◯◯を体現する、など）は書かない。著名企業ほど一般的なイメージ（例：「人のための技術」「遊び」）を書きたくなるが、企業情報にその語が無ければ書いてはならない。
 3. 出力で鉤括弧「」『』を一切使わない。企業のキーワード・理念・製品名であっても、自分の強みや特質であっても、引用符で括ってはならない。引用した体裁そのものが「出典がある」という誤解を生むため、強調目的の引用符は全面的に禁止する。強調したい場合は括弧を使わず、地の文で書く。
 4. 業績・売上・シェア・従業員数・導入技術などの数値も、企業情報に無い限り書かない。
-5. 企業固有の記述が無い部分は、【 】で括ったプレースホルダのまま残す（例：【御社の事業のうち、あなたが関心を持った具体的な取り組み】）。
-6. ユーザーの経験・エピソードが不足している箇所も絶対に捏造せず、【 】の形で残す。【 】の中には「何を書けばよいか」の短い指示だけを書く。
+5. 企業固有の記述が無い部分は、【 】で括った穴埋めを残す。中身は短いラベルだけ（10〜14文字以内）にし、「例：」「：」や説明文・指示文を入れない。1つの【 】に複数の指示を詰め込まない。良い例：【事業内容への共感】【入社後に携わりたい業務】【志望の理由】。悪い例：【ここにあなたの経験を入力：例：大学のゼミで地域課題をフィールドワークし、チームで調査報告書を作成】。
+6. ユーザーの経験・エピソードが不足している箇所も絶対に捏造せず、同じく短いラベルの【 】で残す（例：【経験の場面】【成果の数字】【学び】）。長い指示文や穴埋めの説明文を本文に差し込まない。
 7. 企業名は必ず含める。ただし企業名以外の企業固有情報は「企業情報」由来のものだけにする。
 8. 公開情報（gBizINFO 等）は「要確認」扱いとし、断定的な言い切りを避ける。企業情報が gBizINFO 由来の場合、同名の別法人が登録されている可能性があるため、企業像を断定的に描写しない。
 9. 本文だけを出力する。前置き・後書き・文字数の自己申告（例：文字数698字）を書かない。`;
@@ -360,11 +223,10 @@ function mock(tool, f, merged) {
   const isGbiz = merged && merged.source === "gbiz";
   const ctxSnippet = ctxText ? ctxText.slice(0, 160) : "";
   const ctxLine = ctxSnippet
-    ? `（${isGbiz ? "経済産業省 gBizINFO より自動取得" : "公開情報より抽出"}：${ctxSnippet}… — 要確認）`
-    : `（企業情報が未入力のため、${company}固有の内容は【 】のまま残します。公式サイトの採用ページや募集要項を貼ると、より具体的になります）`;
+    ? `（${isGbiz ? "経済産業省 gBizINFO（確認のうえ選択）" : "公開情報より抽出"}：${ctxSnippet}… — 要確認）`
+    : `（企業情報が未確認・未入力のため、${company}固有の内容は【 】のまま残します。公式サイトの採用ページや募集要項を貼ると、より具体的になります）`;
 
   let body = "";
-  const phExp = "【ここにあなたの経験を入力：例：大学のゼミで地域課題をフィールドワークし、チームで調査報告書を作成。その過程で得た工夫を活かしたい】";
 
   if (tool === "rirekisho" || tool === "shokumu") {
     body =
@@ -376,19 +238,19 @@ function mock(tool, f, merged) {
 （該当があれば記入）
 
 【志望動機】
-${company}を志望する理由は、${exp ? exp + "を通じて" : ""}貴社の事業で貢献したいと考えたからです。${ctxLine}
+${company}を志望する理由は、${exp ? exp + "を通じて" : ""}【志望の理由】です。${ctxLine}
 
 【自己PR】
-${exp ? exp + "の経験から、" : ""}【ここにあなたの強みを入力：例：目標に向けて計画を立て、最後までやり遂げる力】
+${exp ? exp + "の経験から、" : ""}【強み】
 
 （※デモ文。上の写真枠に画像を貼り、氏名・住所などを直接編集してください。企業固有の内容は「企業情報」からのみ記述します。）`;
   } else if (tool === "jiko-pr") {
     body =
 `【自分の強み】
-${exp ? exp + "を成功させた経験があり、" : ""}【ここにあなたの強みを入力：例：目標に向けて計画を立て、粘り強く進める力】
+${exp ? exp + "を成功させた経験があり、" : ""}【強み】
 
 【エピソード】
-具体的には、${exp ? exp + "の過程で" : "【ここに具体的なエピソードを入力：例：3人チームで2ヶ月で〇〇を達成】"}、成果を出しました。このプロセスで得た力を${company}でも活かせます。
+具体的には、${exp ? exp + "の過程で" : "【具体的なエピソード】"}、成果を出しました。このプロセスで得た力を${company}でも活かせます。
 ${ctxLine}
 
 （※デモ文。本番はご入力からオリジナルの自己PRを生成します。）`;
@@ -397,28 +259,29 @@ ${ctxLine}
 `【よく聞かれる質問と回答の構成】
 
 Q. なぜ${company}を志望しますか？
-A. 結論ファーストで「${exp ? exp + "を活かしたい" : "【ここに動機を入力：例：貴社の〇〇事業に共感】"}」と述べ、理由を具体化。${ctxLine}
+A. 結論ファーストで「${exp ? exp + "を活かしたい" : "【志望の理由】"}」と述べ、理由を具体化。${ctxLine}
 
 Q. あなたの強みは？
-A. 【ここにあなたの強みを入力：例：限られた期間で関係者と調整し、成果を出した経験】
+A. 【強み】
 
 Q. 入社後にどんな活躍をしたいですか？
-A. 【ここに入社後のビジョンを入力：例：3年以内に△△領域を任され、〇〇を達成したい】
+A. 【入社後のビジョン】
 
 （※デモ文。本番はあなたの経歴から本番想定の回答を生成します。）`;
   } else {
     body =
 `■第1段落（結論）：なぜ${company}なのか
-${company}を志望する理由は、${exp ? exp + "を通じて" : ""}【ここにあなたの動機を入力：例：貴社の〇〇事業に共感し、自分の△△経験を活かしたい】です。
+${company}を志望する理由は、${exp ? exp + "を通じて" : ""}【志望の理由】です。
 
 ■第2段落（経験と接続）：あなたの経験
-${exp ? exp + "の経験から、" : ""}【ここにあなたの経験を入力：例：大学のゼミで地域課題をフィールドワークし、チームで調査報告書を作成】。
+${exp ? exp + "の経験から、" : ""}【経験の場面】。
 
 ■第3段落（入社後のビジョン）
-入社後は、【ここに入社後のビジョンを入力：例：3年以内に△△領域を任され、〇〇を達成したい】。
+入社後は、【入社後のビジョン】。
+
 ${ctxLine}
 
-（※デモ文。実際の AI はご入力から生成します。企業固有の内容は「企業情報」からのみ記述し、空欄は【】で残します。文字数目安：${len}字／トーン：${tone}）`;
+（※デモ文。実際の AI はご入力から生成します。企業固有の内容は「企業情報」からのみ記述し、空欄は【 】で残します。文字数目安：${len}字／トーン：${tone}）`;
   }
 
   const missingExperience = !exp;
@@ -458,9 +321,12 @@ async function callModel(model, messages) {
     err.status = r.status;
     throw err;
   }
-  const text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  const choice = (data.choices && data.choices[0]) || null;
+  const text = choice && choice.message && choice.message.content;
   if (!text) { const err = new Error("空の応答"); err.action = "switch"; throw err; }
-  return text;
+  // finish_reason: "length" は上限で切れた（＝文が途中で終わっている）。黙って返すと
+  // 字数カウンタと食い違い「壊れている」ように見えるため、フラグとして持ち回る。
+  return { text: text, finishReason: (choice && choice.finish_reason) || null };
 }
 
 // 無料モデルを順に試す。全滅(無料枠枯渇等)なら null、認証エラー等はそのまま投げる。
@@ -468,8 +334,8 @@ async function generateWithFallback(messages) {
   let lastErr = null;
   for (const model of FALLBACK_MODELS) {
     try {
-      const text = await callModel(model, messages);
-      return { text: text, model: model };
+      const out = await callModel(model, messages);
+      return { text: out.text, model: model, finishReason: out.finishReason };
     } catch (e) {
       if (e.action === "fatal") throw e;
       lastErr = e;
@@ -532,8 +398,29 @@ export default async function handler(req, res) {
   if (body && body.fields) {
     const f = body.fields;
     const ctx = await research(f["企業情報"]);          // ルートA: ユーザー貼りURL/テキスト
-    const gbizRes = await gbizResearch(f["企業名"]);       // ルートB: gBizINFO 自動取得
+
+    // ルートB: 確認済みの法人番号があるときだけ gBizINFO を使う。
+    // 法人名での自動検索は行わない —— 同名の別法人に当たると「事実だが別会社」が
+    // 志望動機に混ざり、利用者はより気づきにくい（P0-0）。確認が無ければ使わない、が正しい。
+    let gbizRes = { result: null, diag: { configured: gbizConfigured(), ok: false, step: "not-confirmed", status: null, error: null, hits: 0 } };
+    const sel = (body.gbiz && typeof body.gbiz === "object") ? body.gbiz : null;
+    if (sel && isCorporateNumber(sel.corporateNumber)) {
+      gbizRes = await gbizDetail(sel.corporateNumber);
+    } else if (sel && sel.confirmed === false) {
+      gbizRes.diag.step = "declined";                 // 利用者が「該当なし/使わない」を明示（正常系）
+    } else {
+      // 旧キャッシュのJS・直接API呼び出しなど、確認を経ていないリクエスト
+      gbizRes.diag.step = "no-confirmation";
+    }
+
     const merged = mergeContext(ctx, gbizRes.result);
+    if (!merged.note) {
+      if (gbizRes.diag.step === "declined") {
+        merged.note = "企業の登録情報（gBizINFO）は使用していません。入力された企業名と企業情報のみで生成しました。";
+      } else if (gbizRes.diag.step === "no-confirmation") {
+        merged.note = "企業情報の自動取得は、企業名の候補を確認したうえで有効になります。ページを再読み込みして企業名を入力し直してください。";
+      }
+    }
     // 成功も失敗も必ず残す。旧実装は失敗時に無言で null を返しており、
     // 機能が全滅していても誰も気づけない（＝最悪の失敗モード）状態だった。
     console.log("[gbiz] " + JSON.stringify(gbizRes.diag));
@@ -559,15 +446,26 @@ export default async function handler(req, res) {
         res.status(200).json(Object.assign(m, { remaining: remaining, gbiz: gbizRes.diag }));
         return;
       }
-      await persistRecord(session, body.tool || "shibou", f, result.text);
+      const cleaned = stripSelfReport(result.text);
+      if (cleaned.stripped) console.log("[gen][strip] 自己申告の文字数を除去しました");
+      const truncated = result.finishReason === "length";
+      if (truncated) console.error("[gen][FAIL] finish_reason=length（上限で切断） model=" + result.model);
+      let notice = merged.note;
+      if (truncated) {
+        notice = (notice ? notice + " " : "") +
+          "※文が途中で切れた可能性があります（出力上限に到達）。もう一度生成するか、文字数の目安を短くしてください。";
+      }
+      await persistRecord(session, body.tool || "shibou", f, cleaned.text);
       res.status(200).json({
-        text: result.text,
+        text: cleaned.text,
         mock: false,
         model: result.model,
+        truncated: truncated,
+        strippedSelfReport: cleaned.stripped,
         companyContextUsed: !!merged.text,
         contextSource: merged.source,
         missingExperience: !(f["経験・キーワード"] || "").trim(),
-        notice: merged.note,
+        notice: notice,
         gbiz: gbizRes.diag,
         remaining: remaining
       });
@@ -582,7 +480,7 @@ export default async function handler(req, res) {
   const messages = (body && body.messages) || [];
   const userText = (messages.filter((m) => m.role === "user").pop() || {}).content || "";
   const system = (messages.find((m) => m.role === "system") || {}).content || "";
-  const hardened = [{ role: "system", content: NO_FABRICATION_RULES + (system ? "\n\n" + system : "") }]
+  const hardened = [{ role: "system", content: NO_FABRICATION_RULES + "\n\n【出力ルール】\n- 本文のみを出力する。前置き・後書き・文字数の自己申告を書かない。\n\n" + (system || "") }]
     .concat(messages.filter(function (m) { return m.role !== "system"; }));
   const key = process.env.OPENAI_API_KEY;
   if (!key) {
@@ -599,7 +497,15 @@ export default async function handler(req, res) {
       }));
       return;
     }
-    res.status(200).json({ text: result.text, model: result.model, remaining: remaining });
+    const cleaned = stripSelfReport(result.text);
+    if (cleaned.stripped) console.log("[gen][strip] 自己申告の文字数を除去しました");
+    res.status(200).json({
+      text: cleaned.text,
+      model: result.model,
+      truncated: result.finishReason === "length",
+      strippedSelfReport: cleaned.stripped,
+      remaining: remaining
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -612,7 +518,6 @@ function legacyMock(system, userText) {
     const m = line.match(/^(.+?)[:：]\s*(.+)$/);
     if (m) v[m[1].trim()] = m[2].trim();
   });
-  const kind = (system || "") + (userText || "");
   const scene = v["応募種別"] || "新卒";
   const job = v["職種"] || "総務・人事";
   const company = v["企業名"] || "御社";

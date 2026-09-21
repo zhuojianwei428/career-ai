@@ -464,3 +464,125 @@ mark.ph {
   .card.policy th { white-space: normal; }
 }
 
+/* ============ P0: 企業確認（gBizINFO） ============ */
+/* 生成の「前」に、どの法人の情報を使うのかを見せて選ばせる。
+   同名の別法人に当たると「事実だが別会社」が混ざるため、ここを飛ばして生成させない。 */
+.company-box {
+  margin-top: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 0.6rem 0.7rem;
+}
+.company-box[hidden] { display: none; }
+.company-head { font-size: 0.82rem; color: var(--ink-soft); margin: 0 0 0.5rem; }
+.company-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.company-item {
+  display: flex; gap: 0.55rem; align-items: flex-start;
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm); padding: 0.5rem 0.6rem; cursor: pointer;
+  min-height: 2.75rem;                     /* touch-targets */
+}
+.company-item:hover { border-color: var(--brand); }
+.company-item input[type=radio] { margin-top: 0.3rem; flex: 0 0 auto; width: 1.05rem; height: 1.05rem; accent-color: var(--brand); }
+.company-item-body { display: flex; flex-direction: column; gap: 0.15rem; }
+.company-item-body strong { font-size: 0.9rem; }
+.company-item-meta { font-size: 0.75rem; color: var(--ink-faint); line-height: 1.5; }
+.company-ok {
+  font-size: 0.85rem; font-weight: 700; color: var(--ok); margin: 0 0 0.35rem;
+  overflow-wrap: anywhere;
+}
+.company-msg { font-size: 0.82rem; color: var(--ink-soft); margin: 0; }
+.company-msg.warn { color: oklch(0.55 0.16 55); font-weight: 600; }
+[data-theme="dark"] .company-msg.warn { color: oklch(0.80 0.12 75); }
+.company-note { font-size: 0.74rem; color: var(--ink-faint); margin: 0.4rem 0 0; line-height: 1.55; }
+.company-facts { margin: 0.35rem 0; font-size: 0.78rem; }
+.company-facts summary { cursor: pointer; color: var(--brand-ink); font-weight: 700; }
+.company-facts ul { margin: 0.35rem 0 0 1.1rem; color: var(--ink-soft); }
+.company-facts li { margin: 0.15rem 0; overflow-wrap: anywhere; }
+.company-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+
+/* ============ P0: 書くヒントのタグ ============ */
+.hint-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-top: 0.4rem; }
+.hint-tags-lead { font-size: 0.75rem; color: var(--ink-faint); }
+.hint-tag {
+  font: inherit; font-size: 0.75rem; cursor: pointer;
+  border: 1px dashed var(--brand); background: transparent; color: var(--brand-ink);
+  border-radius: var(--radius-pill); padding: 0.3rem 0.6rem; min-height: 2rem;
+}
+.hint-tag:hover { background: var(--brand-soft); }
+.hint-tags-note { font-size: 0.72rem; color: var(--ink-faint); }
+
+/* ============ P0: 文字数カウンタ ============ */
+.doc-count { font-size: 0.78rem; color: var(--ink-faint); margin: 0.4rem 0 0; }
+.doc-count.over { color: oklch(0.55 0.16 55); font-weight: 600; }
+.doc-count.under { color: var(--ink-faint); }
+[data-theme="dark"] .doc-count.over { color: oklch(0.80 0.12 75); }
+
+/* ============ P0: 【 】を埋めるモーダル（.auth-modal の CSS を再利用） ============ */
+.ph-label { font-weight: 700; font-size: 0.95rem; margin: 0 0 0.4rem; overflow-wrap: anywhere; }
+.ph-hint { font-size: 0.78rem; color: var(--ink-soft); margin: 0 0 0.6rem; line-height: 1.6; }
+#ph-input {
+  width: 100%; font: inherit; padding: 0.6rem 0.7rem; border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); line-height: 1.7;
+}
+#ph-input:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.ph-actions { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.7rem; }
+
+/* ============ P0: モバイルでの全画面編集 ============ */
+/* [hidden] は UA 既定（display:none）だが、作者が display を指定した要素では負ける */
+[data-fill-ph][hidden], .edit-done[hidden] { display: none; }
+body.edit-full { overflow: hidden; }
+body.edit-full .doc {
+  position: fixed; inset: 0; z-index: 900;
+  height: var(--vvh, 100vh); max-height: 100vh;
+  margin: 0; border: 0; border-radius: 0;
+  padding: 1rem 1rem 5rem; overflow: auto;
+  background: var(--surface); font-size: 1.0625rem;
+}
+.edit-done {
+  position: fixed; right: 1rem; bottom: 1rem; z-index: 960;
+  box-shadow: var(--shadow-lg);
+}
+
+@media (max-width: 40rem) {
+  /* 指で押しやすい大きさに揃える（touch-targets） */
+  .btn.mini { min-height: 2.75rem; }
+  .toolbar .btn { flex: 1 1 9rem; }
+  .hint-tag { min-height: 2.25rem; padding: 0.4rem 0.7rem; }
+  /* 長いフォームでも主導線が常に指の届く位置に残るようにする */
+  #gen-btn { position: sticky; bottom: 0.5rem; z-index: 20; box-shadow: var(--shadow); }
+}
+
+/* 編集全画面のまま PDF 出力しても崩れないように、印刷時は通常配置へ戻す */
+@media print {
+  body.edit-full { overflow: visible; }
+  body.edit-full .doc {
+    position: static; height: auto; max-height: none; padding: 0; overflow: visible;
+  }
+  .edit-done { display: none !important; }
+}
+
+/* ============ P0: 詳細設定の折りたたみ（フォーム減負） ============ */
+/* 文字数・トーンは初期値のままで困らないので、既定は畳んでおく。
+   畳んでもフォーム部品は DOM に残るため、送信値は変わらない。 */
+.adv {
+  margin: 0.75rem 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 0.4rem 0.75rem 0.6rem;
+}
+.adv summary {
+  cursor: pointer; font-weight: 700; font-size: 0.875rem;
+  min-height: 2.5rem;                     /* touch-targets */
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.25rem;
+}
+.adv summary .hint { font-weight: 400; }
+.adv .field { margin-top: 0.25rem; }
+
+/* ============ P0: 企業情報の扱い（信任セクション） ============ */
+.trust-list { margin: 0 0 0.5rem 1.1rem; }
+.trust-list li { margin: 0.45rem 0; font-size: 0.9rem; color: var(--ink-soft); line-height: 1.75; }
+.trust-list strong { color: var(--ink); }
+

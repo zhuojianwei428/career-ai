@@ -1,0 +1,411 @@
+// P0（企業確認・H1/Title・フォーム減負・【】補完・コピー・字数・モバイル・信任）検査
+//   node test-p0.mjs
+// ネットワーク不要。fetch を横取りして実ハンドラを走らせる（ESM のキャッシュは ?case= で回避）。
+import { readFileSync, existsSync } from "node:fs";
+
+const BASE = "https://www.coverletterkit.com";
+const PAGES = ["index.html", "jiko-pr.html", "rirekisho.html", "shokumu.html", "mensetsu.html"];
+const ALL_PAGES = PAGES.concat(["account.html", "privacy.html"]);
+const GBIZ = "https://api.info.gbiz.go.jp/hojin/v2/hojin";
+const CN = "1180301018771";
+const CN2 = "4180301018772";
+
+let pass = 0, fail = 0;
+const failures = [];
+function ok(cond, label) {
+  if (cond) { pass++; return; }
+  fail++; failures.push(label);
+}
+function eq(actual, expected, label) {
+  const a = JSON.stringify(actual), b = JSON.stringify(expected);
+  if (a === b) { pass++; return; }
+  fail++; failures.push(label + "\n      actual:   " + a + "\n      expected: " + b);
+}
+const read = (f) => readFileSync(new URL("./" + f, import.meta.url), "utf8");
+
+const gen = read("api/generate.js");
+const comp = read("api/company.js");
+const lib = read("api/_lib/gbiz.mjs");
+const eng = read("assets/js/engine.js");
+const css = read("assets/css/style.css");
+const index = read("index.html");
+
+/* ================= 1. P0-0 企業確認エンドポイント（実際に走らせる） ================= */
+function jsonRes(status, obj) {
+  return {
+    ok: status >= 200 && status < 300,
+    status: status,
+    headers: { get: () => "application/json" },
+    json: async () => obj,
+    text: async () => JSON.stringify(obj)
+  };
+}
+const calls = [];
+function stubFetch(mode) {
+  return async function (url) {
+    const u = String(url);
+    calls.push(u);
+    if (u.indexOf("api.info.gbiz.go.jp") < 0) throw new Error("unexpected fetch: " + u);
+    // 実測再現: 末尾スラッシュ付きはトークンが正しくても 500（ダミールート扱い）
+    if (/\/hojin\/v2\/hojin\/\?/.test(u)) {
+      return jsonRes(500, { message: "500 - Internal Server Error." });
+    }
+    if (mode === "bad") return jsonRes(401, { message: "401 - Unauthorized" });
+    if (u.indexOf("?name=") >= 0) {
+      if (mode === "empty") return jsonRes(200, { "hojin-infos": [] });
+      // 同名の別法人が並ぶ実際の形（＝選ばせないと取り違える）
+      return jsonRes(200, { "hojin-infos": [
+        { corporate_number: CN2, name: "株式会社ミライテック", location: "沖縄県那覇市", status: "-", industry: ["G"], date_of_establishment: "2015-04-01" },
+        { corporate_number: CN, name: "トヨタ自動車株式会社", location: "愛知県豊田市トヨタ町1番地", status: "-", industry: ["E"] },
+        { corporate_number: "9999999999999", name: "旧社名 株式会社ミライテック", location: "東京都", status: "2" }
+      ] });
+    }
+    if (u === GBIZ + "/" + CN) {
+      return jsonRes(200, { "hojin-infos": [{
+        corporate_number: CN, name: "トヨタ自動車株式会社", industry: ["E"],
+        business_summary: "自動車の製造・販売", capital_stock: 635401000000, employee_number: 375870,
+        location: "愛知県豊田市トヨタ町1番地", date_of_establishment: "1937-08-28",
+        representative_name: "佐藤 恒治", company_url: "https://global.toyota/"
+      }] });
+    }
+    return jsonRes(200, { "hojin-infos": [] });
+  };
+}
+function makeRes() {
+  return {
+    code: null, payload: null, headers: {},
+    status(c) { this.code = c; return this; },
+    json(o) { this.payload = o; return this; },
+    setHeader(k, v) { this.headers[k] = v; }
+  };
+}
+async function loadCompany(tag) {
+  const url = new URL("./api/company.js?case=" + tag, import.meta.url).href;
+  return (await import(url)).default;
+}
+async function callCompany(handler, body, ip) {
+  const res = makeRes();
+  const logs = [], errs = [], warns = [];
+  const oL = console.log, oE = console.error, oW = console.warn;
+  console.log = (...a) => logs.push(a.join(" "));
+  console.error = (...a) => errs.push(a.join(" "));
+  console.warn = (...a) => warns.push(a.join(" "));
+  try {
+    await handler({ method: "POST", headers: { "x-forwarded-for": ip || "10.0.0.1" }, body: body }, res);
+  } finally {
+    console.log = oL; console.error = oE; console.warn = oW;
+  }
+  return { res, logs, errs, warns };
+}
+async function withFetch(mode, fn) {
+  const orig = globalThis.fetch;
+  globalThis.fetch = stubFetch(mode);
+  try { return await fn(); } finally { globalThis.fetch = orig; }
+}
+
+// 検索: 同名別法人を「選ばせる」ために複数返す
+const c1 = await loadCompany("search");
+const S = await withFetch("ok", async () => {
+  process.env.GBIZ_API_TOKEN = "t".repeat(40);
+  calls.length = 0;
+  return callCompany(c1, { action: "search", name: "株式会社ミライテック" }, "10.0.0.10");
+});
+eq(S.res.code, 200, "P0-0: 検索は 200");
+ok(S.res.payload && S.res.payload.configured === true, "P0-0: configured=true");
+eq(S.res.payload.candidates.length, 3, "P0-0: 同名の別法人を含む候補を3件返す（1社に決め打ちしない）");
+ok(S.res.payload.candidates.every((x) => /^[0-9]{13}$/.test(x.corporateNumber)),
+  "P0-0: 候補には必ず13桁の法人番号が付く（選んだ法人を特定するため）");
+ok(S.res.payload.candidates.every((x) => x.name && x.location !== undefined),
+  "P0-0: 候補に法人名と所在地が入る（利用者が見分けられる）");
+eq(S.res.payload.candidates[2].status, "2", "P0-0: 登記閉鎖等の状態も候補に含める（除外せず後ろに回す）");
+ok(typeof S.logs.find((l) => l.indexOf("[company][search]") >= 0) === "string",
+  "P0-0: 検索結果が必ずログに残る");
+ok(calls.every((u) => !/\/hojin\/v2\/hojin\/\?/.test(u)), "P0-0: 末尾スラッシュ形式を使っていない");
+
+// 候補ゼロ（個人事業主など）は正常系
+const S0 = await withFetch("empty", async () => {
+  process.env.GBIZ_API_TOKEN = "t".repeat(40);
+  return callCompany(c1, { action: "search", name: "個人事業のミライ工房" }, "10.0.0.11");
+});
+eq(S0.res.code, 200, "P0-0: 該当なしでも 200");
+eq(S0.res.payload.candidates, [], "P0-0: 候補ゼロを返す");
+ok(/見つかりませんでした/.test(S0.res.payload.message), "P0-0: 「見つからなかった」ことを正直に伝える");
+ok(!S0.errs.some((l) => l.indexOf("[gbiz][FAIL]") >= 0), "P0-0: 該当なしは FAIL ログにしない（異常ではない）");
+
+// 上流 401 でも 500 を返さない
+const SB = await withFetch("bad", async () => {
+  process.env.GBIZ_API_TOKEN = "x".repeat(40);
+  return callCompany(c1, { action: "search", name: "トヨタ自動車株式会社" }, "10.0.0.12");
+});
+eq(SB.res.code, 200, "P0-0: 上流 401 でも 200（UIは通常生成へ落とせる）");
+ok(SB.res.payload.ok === false && SB.res.payload.error === "http-401", "P0-0: 理由を構造化して返す");
+ok(SB.errs.some((l) => l.indexOf("[gbiz][FAIL]") >= 0), "P0-0: 失敗がログに残る");
+
+// 未設定
+const SN = await withFetch("ok", async () => {
+  delete process.env.GBIZ_API_TOKEN;
+  return callCompany(c1, { action: "search", name: "トヨタ自動車株式会社" }, "10.0.0.13");
+});
+eq(SN.res.code, 200, "P0-0: トークン未設定でも 200");
+eq(SN.res.payload.configured, false, "P0-0: configured=false を返す");
+ok(SN.warns.some((l) => l.indexOf("[company][SKIP]") >= 0), "P0-0: 未設定が警告として残る");
+
+// 入力の検証
+const SX = await withFetch("ok", async () => {
+  process.env.GBIZ_API_TOKEN = "t".repeat(40);
+  return callCompany(c1, { action: "search", name: "あ" }, "10.0.0.14");
+});
+eq(SX.res.code, 400, "P0-0: 1文字の企業名は 400（無駄な外部呼び出しをしない）");
+
+// 詳細（生成に使う情報を、生成の前に見せる）
+process.env.GBIZ_API_TOKEN = "t".repeat(40);
+const DT = await withFetch("ok", async () => callCompany(c1, { action: "detail", corporateNumber: CN }, "10.0.0.15"));
+eq(DT.res.code, 200, "P0-0: 詳細は 200");
+ok(DT.res.payload.ok === true, "P0-0: 詳細 ok=true");
+eq(DT.res.payload.matched.corporateNumber, CN, "P0-0: 選んだ法人番号の情報を返す");
+ok(DT.res.payload.facts.some((f) => f.indexOf("法人名: トヨタ自動車株式会社") === 0), "P0-0: 法人名が事実に含まれる");
+ok(DT.res.payload.facts.some((f) => f.indexOf("事業概要:") === 0), "P0-0: 事業概要が事実に含まれる（＝生成前に見せられる）");
+ok(/出典：gBizINFO/.test(DT.res.payload.note), "P0-0: 出典を明示する");
+
+// 法人番号の検証（パス注入の防止）
+for (const bad of ["../../zzz", CN + "/patent", "12345", "abcdefghijklm", ""]) {
+  calls.length = 0;
+  const r = await withFetch("ok", async () => callCompany(c1, { action: "detail", corporateNumber: bad }, "10.0.0.16"));
+  eq(r.res.code, 200, "P0-0: 不正な法人番号 " + JSON.stringify(bad) + " でも 500 にしない");
+  eq(calls.length, 0, "P0-0: 不正な法人番号 " + JSON.stringify(bad) + " では外部に fetch しない");
+  eq(r.res.payload.ok, false, "P0-0: 不正な法人番号 " + JSON.stringify(bad) + " は ok=false");
+}
+
+// GET は受け付けない
+const rGet = makeRes();
+await withFetch("ok", async () => {
+  const oL = console.log; console.log = () => {};
+  await c1({ method: "GET", headers: {}, body: null }, rGet);
+  console.log = oL;
+});
+eq(rGet.code, 405, "P0-0: GET は 405");
+
+// 簡易レート制限（外部APIのトークンを使い潰されないための最低限）
+const rateH = await loadCompany("rate");
+let last = null;
+for (let i = 0; i < 61; i++) {
+  const r = await withFetch("ok", async () => callCompany(rateH, { action: "search", name: "テスト株式会社" }, "10.9.9.9"));
+  last = r.res.code;
+}
+eq(last, 429, "P0-0: 同一IPからの連打は 429 で止まる（60回/時）");
+
+/* ================= 2. P0-0 フロント側 ================= */
+ok(/CareerAI\.company\.attach\("gen-form"\)/.test(index), "P0-0: index.html が企業確認UIを取り付けている");
+ok(/var CompanyConfirm = \(function \(\)/.test(eng), "P0-0: engine.js に CompanyConfirm がある");
+ok(/unconfirmed/.test(eng) && /st\.status = "searching"/.test(eng), "P0-0: 未確認/検索中を状態として持つ");
+ok(/isResolved: function \(\) \{ return st\.status === "confirmed" \|\| st\.status === "declined" \|\| st\.status === "fallback"; \}/.test(eng),
+  "P0-0: 「確認済み／該当なし／データベース不可」の3通りで解決扱い（行き止まりを作らない）");
+ok(/radio\.name = "company-choice"/.test(eng), "P0-0: 候補は radio で1社を選ばせる");
+ok(/payload\.gbiz = ccPayload/.test(eng), "P0-0: 確認結果（法人番号）を生成リクエストに載せる");
+ok(/企業名の候補を確認してください/.test(eng), "P0-0: 未確認なら生成を止めて確認を促す");
+// 名前を書き換えたら確認を無効化（別会社の法人番号で生成する事故を防ぐ）
+ok(/input\.addEventListener\("input", function \(\) \{[\s\S]{0,220}?reset\(st\)/.test(eng),
+  "P0-0: 企業名を書き換えると確認が無効になる");
+// 生成に使う情報を生成前に見せる（赤線#3）
+ok(/生成に使う登録情報を見る/.test(eng), "P0-0: 生成前に「使う情報」を確認できる");
+ok(/company-facts/.test(css), "P0-0: 確認情報の折りたたみが CSS にある");
+for (const p of ["jiko-pr.html", "rirekisho.html", "shokumu.html", "mensetsu.html"]) {
+  const html = read(p);
+  ok(!/structured:\s*true/.test(html), p + " は旧契約のまま（gBizINFO を使わない＝取り違えの経路が無い）");
+  ok(!/CareerAI\.company\.attach/.test(html), p + " には企業確認UIを付けない（使わないものを確認させない）");
+}
+
+/* ================= 3. P0-1 H1 と Title ================= */
+const h1 = (index.match(/<h1[^>]*>([\s\S]*?)<\/h1>/) || [])[1] || "";
+const h1text = h1.replace(/<br\s*\/?>/g, "").replace(/\s+/g, " ").trim();
+ok(/^志望動機 AI/.test(h1text), "P0-1: H1 が「志望動機 AI」で始まる（実測 " + JSON.stringify(h1text.slice(0, 24)) + "）");
+ok(h1text.indexOf("志望動機 AI") >= 0, "P0-1: H1 に「志望動機 AI」が連続した語として入っている");
+ok(h1text.indexOf("経歴は捏造しません") >= 0, "P0-1: H1 で不捏造を宣言している");
+ok(h1text.indexOf("就活AI") < 0, "P0-1: H1 にブランド名（就活AI）を入れない（キーワードに場所を譲る）");
+const title = (index.match(/<title>([^<]*)<\/title>/) || [])[1] || "";
+ok(/^志望動機 AI｜/.test(title), "P0-1: Title の先頭がキーワード（志望動詞 AI）");
+ok(/ - 就活AI$/.test(title), "P0-1: Title の末尾がブランド名（就活AI）");
+const ogt = (index.match(/<meta property="og:title" content="([^"]*)"/) || [])[1] || "";
+eq(ogt, title, "P0-1: og:title が <title> と一致する");
+const desc = (index.match(/<meta name="description" content="([^"]*)"/) || [])[1] || "";
+ok(/^志望動機 AI/.test(desc), "P0-1: description もキーワードから始まる");
+ok(desc.length <= 120, "P0-1: description が 120 文字以内（実測 " + desc.length + "）");
+ok(/og:description" content="([^"]*)"/.test(index) &&
+  (index.match(/og:description" content="([^"]*)"/) || [])[1] === desc, "P0-1: og:description が description と一致する");
+
+// バッジの順序（登録不要 ・ すぐ使える ・ 完全無料）
+const badges = [...(index.match(/<div class="badges">([\s\S]*?)<\/div>/) || [, ""])[1].matchAll(/<span class="badge">([^<]+)<\/span>/g)]
+  .map((m) => m[1]);
+eq(badges, ["登録不要", "すぐ使える", "完全無料"], "P0-1: バッジが指定どおりの3つ・指定どおりの順");
+
+// 他ツールページもキーワード先頭（一頁一詞）
+for (const [p, kw] of [["jiko-pr.html", "自己PR AI"], ["rirekisho.html", "履歴書 AI"],
+  ["shokumu.html", "職務経歴書 AI"], ["mensetsu.html", "面接対策 AI"]]) {
+  const t = (read(p).match(/<h1[^>]*>([\s\S]*?)<\/h1>/) || [])[1] || "";
+  ok(t.replace(/<br\s*\/?>/g, "").replace(/\s+/g, " ").trim().indexOf(kw) === 0,
+    "P0-1: " + p + " の H1 が「" + kw + "」で始まる");
+}
+
+/* ================= 4. P0-1 半升级の文案（言い過ぎていない） ================= */
+ok(!/そのまま提出/.test(index) && !/そのまま出せ/.test(index),
+  "P0-1: 「そのまま提出できる」と断定していない（同名別法人の解が入るまで半升级に留める）");
+ok(!/企業研究済み|企業研究も完了/.test(index), "P0-8: 「企業研究済み」と断定していない");
+ok(/候補から選んで確認/.test(index), "P0-8: 企業情報の取得方法を具体的に（過大な言い方をしない）");
+ok(/情報が足りない箇所は【 】のまま残します/.test(index), "P0-1: 半升级の検証可能な表現が残っている");
+
+/* ================= 5. P0-2 フォーム減負 ================= */
+ok(/<details class="adv">/.test(index), "P0-2: 詳細設定が折りたたみになっている");
+const advBlock = (index.match(/<details class="adv">([\s\S]*?)<\/details>/) || [, ""])[1];
+ok(/data-field="文字数"/.test(advBlock) && /data-field="トーン"/.test(advBlock),
+  "P0-2: 折りたたみの中に文字数とトーンが入っている");
+ok(/aria-pressed="true"/.test(advBlock), "P0-2: 折りたたんでも初期値が選ばれている（既定のまま送れる）");
+eq((index.match(/data-field="応募種別"/g) || []).length, 4, "P0-2: 応募種別は4種のまま（構造を変えていない）");
+ok(/\.adv summary \{[\s\S]{0,200}?min-height: 2\.5rem/.test(css), "P0-2: 折りたたみの見出しもタップ領域を確保");
+// 動的プレースホルダ
+ok(/var SCENE_PLACEHOLDERS = \{/.test(eng), "P0-2: 応募種別ごとのプレースホルダ表がある");
+for (const s of ["新卒", "転職", "バイト", "進学"]) ok(eng.indexOf('"' + s + '": {') >= 0, "P0-2: " + s + " 用の文言がある");
+ok(/function bindDynamicPlaceholders/.test(eng) && /applyScenePlaceholders\(form, c\.getAttribute\("data-value"\)\)/.test(eng),
+  "P0-2: 応募種別の切替でプレースホルダが変わる");
+ok(/hint-tags/.test(eng) && /【" \+ t \+ "】/.test(eng), "P0-2: 書くヒントのタグが【 】を挿入する");
+ok(/数字や事実はご自身で入力してください/.test(eng), "P0-2: タグは事実を作らないと明記（捏造しない）");
+ok(/gentleHintShown/.test(eng) && /経験を入れると、あなた固有の文章になります/.test(eng),
+  "P0-2: 空欄の指摘ではなく「入れると何が変わるか」を1回だけ伝える");
+
+/* ================= 6. P0-3 【 】の短ラベル化と去歧義 ================= */
+ok(/中身は短いラベルだけ（10〜14文字以内）/.test(gen), "P0-3: 【 】の中身を10〜14文字の短いラベルに限定");
+ok(/【事業内容への共感】【入社後に携わりたい業務】【志望の理由】/.test(gen), "P0-3: 良い例を示している");
+ok(/【ここにあなたの経験を入力：例：/.test(gen), "P0-3: 悪い例（60字超の指示文）も明示して排除");
+ok(/1つの【 】に複数の指示を詰め込まない/.test(gen), "P0-3: 1つの穴に複数指示を入れさせない");
+for (const lbl of ["【経験の場面】", "【成果の数字】", "【学び】"]) {
+  ok(gen.indexOf(lbl) >= 0, "P0-3: 短ラベルの語彙 " + lbl + " を提示している");
+}
+// デモ（mock）にも長い指示文を残さない
+// ルール本文には「悪い例」として長い【 】を意図的に載せているので、そこは除外して数える
+const genMockPart = gen.replace(/const NO_FABRICATION_RULES =[\s\S]*?`;/, "");
+const longPh = [...genMockPart.matchAll(/【[^】]{30,}】/g)].map((m) => m[0]);
+eq(longPh, [], "P0-3: generate.js に 30 文字超の【 】が残っていない（短ラベル化）");
+// 去歧義：見出しと免責の【 】はクリック対象にしない
+ok(/var SECTION_LABELS = \{/.test(eng), "P0-3: 見出しラベルの一覧を持つ");
+for (const s of ["学歴", "職歴", "志望動機", "自己PR", "自分の強み", "エピソード", "よく聞かれる質問と回答の構成"]) {
+  ok(eng.indexOf('"' + s + '": 1') >= 0, "P0-3: 見出し「" + s + "」を穴埋め対象から除外");
+}
+ok(/if \(!s\) return false;/.test(eng), "P0-3: 中身が空の【 】（免責文）は穴埋め対象にしない");
+ok(/data-ph="1"/.test(eng), "P0-3: 穴埋め対象だけに目印を付ける");
+ok(/t\.closest \? t\.closest\("mark\.ph\[data-ph\]"\)/.test(eng), "P0-3: 本文のクリックで穴埋めを開く");
+ok(/phModal\.className = "auth-modal ph-modal"/.test(eng), "P0-3: モーダルは .auth-modal の CSS を再利用");
+ok(/【" \+ label \+ "】を埋める/.test(eng), "P0-3: どの穴を埋めているかをタイトルに出す");
+ok(/【 】のままになっています。具体的な内容を入力してください/.test(eng),
+  "P0-3: 【 】のままの入力を弾く（穴を穴で埋めさせない）");
+ok(/data-fill-ph/.test(eng) && /【 】を埋める（" \+ n \+ "）/.test(eng), "P0-3: 残りの穴数を出して埋める導線がある");
+// 埋めたあとは素のテキストに戻す（強調が残って印刷/コピーに混ざらない）
+ok(/createTextNode\(value\)/.test(eng) && /replaceChild\(text, phTarget\)/.test(eng),
+  "P0-3: 反映後は mark を外して素のテキストにする（印刷・コピーに装飾が残らない）");
+ok(/mark\.ph \{\n  background: color-mix/.test(css), "P0-3: 穴埋めの強調表示は従来どおり");
+
+/* ================= 7. P0-4 全文コピー ================= */
+ok(/data-copy-all/.test(eng), "P0-4: 全文コピーのボタンを生成する");
+ok(/async function copyAll\(/.test(eng) && /navigator\.clipboard\.writeText/.test(eng), "P0-4: Clipboard API を使う");
+ok(/document\.execCommand\("copy"\)/.test(eng), "P0-4: 失敗時に execCommand へフォールバック (HTTP/旧ブラウザ)");
+ok(/track\("copy_all", \{ chars: countChars\(text\) \}\)/.test(eng), "P0-4: コピーを計測（転換点）");
+ok(/btn\.textContent = "コピーしました"/.test(eng), "P0-4: 押した手応えを返す");
+ok(/tb\.insertBefore\(b, tb\.firstChild\)/.test(eng), "P0-4: コピーはツールバーの先頭（主導線上）");
+ok(/応募フォームや履歴書に貼り付けられます/.test(eng), "P0-4: 使い道を書く（ただし「提出できる」とは断定しない）");
+
+/* ================= 8. P0-6 字数 ================= */
+ok(/function countChars\(text\)/.test(eng), "P0-6: 文字数を自前で数える");
+ok(/Intl\.Segmenter\("ja", \{ granularity: "grapheme" \}\)/.test(eng), "P0-6: Intl.Segmenter で書記素を数える");
+ok(/return Array\.from\(t\)\.length;/.test(eng), "P0-6: 非対応ブラウザは Array.from にフォールバック");
+ok(/replace\(\/\[\\n\\r\]\/g, ""\)/.test(eng), "P0-6: 改行は数えない（目安と比較できるように）");
+ok(/function parseRange\(v\)/.test(eng) && /目安 " \+ range\.min \+ "〜" \+ range\.max/.test(eng), "P0-6: 目安の範囲を表示する");
+ok(/result\.addEventListener\("input", refreshDoc\)/.test(eng), "P0-6: 編集のたびに数え直す");
+// モデルの自己申告は先に落とす（カウンタと食い違わせない）
+ok(/function stripSelfReport\(text\)/.test(gen), "P0-6: サーバ側でモデルの自己申告を除去する");
+ok(/文字数\|字数\)?\\s\*\[：:\]/.test(gen) || /文字数\|字数/.test(gen), "P0-6: 「文字数：698字」型を対象にしている");
+ok(/strippedSelfReport: cleaned\.stripped/.test(gen), "P0-6: 除去したかどうかをレスポンスに載せる（観測できる）");
+ok(/MAX_TOKENS = 3000/.test(gen), "P0-6: 上限を 3000 に上げた（「長め」で文が切れないように）");
+ok(/finish_reason/.test(gen) && /truncated: truncated/.test(gen), "P0-6: 上限で切れたかを返す");
+ok(/文が途中で切れた可能性があります/.test(eng), "P0-6: 切れている可能性を UI で伝える");
+ok(/\.doc-count \{/.test(css), "P0-6: 文字数表示のスタイルがある");
+
+/* ================= 9. P0-7 モバイル ================= */
+ok(/function syncViewportHeight\(\)/.test(eng) && /window\.visualViewport/.test(eng), "P0-7: visualViewport に追従する");
+ok(/--vvh/.test(eng) && /--vvh/.test(css), "P0-7: キーボード表示時の高さを CSS 変数で渡す");
+ok(/body\.edit-full \.doc \{[\s\S]{0,120}?position: fixed/.test(css), "P0-7: 編集は全画面に切り替えられる");
+ok(/height: var\(--vvh, 100vh\)/.test(css), "P0-7: 全画面の高さがビューポートに追従");
+ok(/data-edit-done/.test(eng) && /編集を終える/.test(eng), "P0-7: 全画面から戻るボタンがある（抜け道を確保）");
+ok(/result\.addEventListener\("focusin", function \(\) \{ if \(isNarrow\(\)\) enterEditFull\(\); \}\)/.test(eng),
+  "P0-7: 狭い画面では編集開始時に全画面へ");
+ok(/\.btn\.mini \{ min-height: 2\.75rem; \}/.test(css), "P0-7: 小さいボタンも 44px 相当に拡大（モバイル）");
+ok(/#gen-btn \{ position: sticky; bottom: 0\.5rem/.test(css), "P0-7: 生成ボタンが常に指の届く位置に残る");
+ok(/body\.edit-full \.doc \{\s*position: static;/.test(css), "P0-7: 全画面のまま印刷しても崩れない");
+// [hidden] が作者CSSに負けないこと（過去に踏んだ罠）
+ok(/\[data-fill-ph\]\[hidden\], \.edit-done\[hidden\] \{ display: none; \}/.test(css),
+  "[hidden] が display 指定に負けないよう明示している");
+
+/* ================= 10. P0-8 信任と出典 ================= */
+ok(/企業情報の扱いと、捏造しない仕組み/.test(index), "P0-8: 信任セクションがある");
+ok(/出典：gBizINFO/.test(index), "P0-8: 出典（gBizINFO）を明示");
+ok(/経済産業省 gBizINFO（政府保有法人データ）/.test(index), "P0-8: データの出所を具体的に書く");
+ok(/法人単位の登録情報です/.test(index), "P0-8: gBizINFO で足りない範囲（募集要項等）を正直に書く");
+ok(/足りない情報は空欄で残します/.test(index), "P0-8: 不捏造の仕組みを説明している");
+ok(/企業情報はどこから取得しますか？/.test(index), "P0-8: 企業情報の入手方法を FAQ にも書く");
+const faqLd = JSON.parse((index.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/) || [, "{}"])[1]);
+const faqQ = (faqLd.mainEntity || []).map((x) => x.name);
+ok(faqQ.indexOf("企業情報はどこから取得しますか？") >= 0, "P0-8: FAQ 構造化データにも同じ質問がある");
+ok(faqQ.length === 5, "P0-8: FAQ は 5 問（実測 " + faqQ.length + "）");
+
+/* ================= 11. 4ページを含む全ページの対外約束を監査 ================= */
+// 「捏造」という語が出てくるのは“しない”という約束の形だけであること
+const badClaims = [];
+for (const p of ALL_PAGES) {
+  const html = read(p);
+  for (const m of html.matchAll(/捏造[^\s、。,）)」<]{0,6}/g)) {
+    const tail = m[0].slice(2);
+    if (!/^(しません|しない|せず|は一切|は絶対)/.test(tail)) badClaims.push(p + ": " + m[0]);
+  }
+}
+eq(badClaims, [], "全ページで「捏造」は否定形（しない約束）としてのみ使われている");
+for (const p of ALL_PAGES) {
+  const html = read(p);
+  ok(!/そのまま提出|そのまま出せ|提出を保証|合格を保証|採用を保証|内定を保証/.test(html),
+    p + ": 成果を保証する言い方をしていない");
+  ok(!/自動補完/.test(html), p + ": 成立しない「自動補完」が残っていない");
+}
+// index 以外に「不捏造」の約束を新設していない（実装が伴わない約束を増やさない）
+for (const p of ["jiko-pr.html", "mensetsu.html"]) {
+  ok(!/捏造/.test(read(p)), p + " には捏造の約束を置いていない（旧契約で gBizINFO を使わないため）");
+}
+// 実測で偽だった約束の再来防止
+ok(!/情報からのみ記述し/.test(index), "index.html: 実測で偽だった「情報からのみ記述し」が復活していない");
+
+/* ================= 12. 既存機能の保全 ================= */
+for (const p of ALL_PAGES) {
+  ok(/<span class="auth-area" id="auth-area"><\/span>/.test(read(p)), p + ": auth-area の器が残っている");
+}
+for (const p of PAGES) {
+  ok(/id="gen-form"/.test(read(p)), p + ": 生成フォームが残っている");
+  ok(/id="result"/.test(read(p)), p + ": 結果の器が残っている");
+  ok(idExistsInToolbar(p), p + ": ツールバーが残っている（PDF/テキスト出力の置き場）");
+}
+function idExistsInToolbar(p) { return /class="toolbar no-print"/.test(read(p)); }
+ok(/const DAILY_LIMIT = 2;/.test(gen), "既存: 匿名の1日2回は据え置き");
+ok(/const LOGGED_DAILY = Number\(process\.env\.LOGGED_DAILY_LIMIT\) \|\| 5;/.test(gen), "既存: ログイン中の上限は据え置き");
+ok(/persistRecord\(session, body\.tool/.test(gen), "既存: 履歴保存はサーバ側のみ（二重保存しない）");
+ok(!/DELETE/.test(read("api/records.js")), "既存: records.js に DELETE を足していない");
+for (const k of ["function generate(", "function fillExample(", "function exportPDF(", "function exportText(", "function setupPhoto("]) {
+  ok(eng.indexOf(k) >= 0, "既存: engine.js の " + k + " が残っている");
+}
+ok(/gbizConfigured\(\)/.test(comp) && /gbizDetail\(/.test(comp), "既存: 企業確認も共有ライブラリ経由で gBizINFO を使う");
+ok(/function gbizToken\(\) \{ return process\.env\.GBIZ_API_TOKEN \|\| ""; \}/.test(lib),
+  "既存: トークンは呼び出し時に読む（読み込み順で挙動が変わらない）");
+
+/* ================= 結果 ================= */
+console.log("\n=== P0（企業確認・キーワード・補完・転換・モバイル・信任）検査 ===");
+if (failures.length) {
+  console.log("\n失敗 (" + failures.length + "):");
+  failures.forEach((f, i) => console.log("  " + (i + 1) + ") " + f));
+} else {
+  console.log("  失敗なし");
+}
+console.log("\nPASS: " + pass + "  FAIL: " + fail + "\n");
+process.exit(fail ? 1 : 0);
