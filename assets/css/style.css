@@ -528,6 +528,11 @@ mark.ph {
 .company-facts li { margin: 0.15rem 0; overflow-wrap: anywhere; }
 .company-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
 .company-hint { font-size: 0.72rem; color: var(--ink-faint); line-height: 1.55; margin: 0.5rem 0 0; overflow-wrap: anywhere; }
+/* モバイルでは 20rem(320px) だと画面の半分近くを占めてしまう。候補が 20 件あっても
+   小屏では 14rem(約224px) に下げ、フォーム本体が見える余白を確保する（スクロールで残りを表示）。 */
+@media (max-width: 48rem) {
+  .company-list { max-height: 14rem; }
+}
 
 /* ============ P0: 書くヒントのタグ ============ */
 .hint-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-top: 0.4rem; }
