@@ -109,6 +109,28 @@
           </div>
         </div>
 
+        <details class="adv" open>
+          <summary>詳細設定（文字数の目安・トーン）<span class="hint">　初期設定：短め 200〜300字／フォーマル</span></summary>
+          <div class="row">
+            <div class="field">
+              <label>文字数の目安</label>
+              <div class="chips">
+                <button type="button" class="chip" data-field="文字数" data-group="len" data-value="200〜300字" aria-pressed="true">短め 200〜300</button>
+                <button type="button" class="chip" data-field="文字数" data-group="len" data-value="300〜500字" aria-pressed="false">普通 300〜500</button>
+                <button type="button" class="chip" data-field="文字数" data-group="len" data-value="500〜800字" aria-pressed="false">長め 500〜800</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>トーン</label>
+              <div class="chips">
+                <button type="button" class="chip" data-field="トーン" data-group="tone" aria-pressed="true">フォーマル</button>
+                <button type="button" class="chip" data-field="トーン" data-group="tone" aria-pressed="false">カジュアル</button>
+                <button type="button" class="chip" data-field="トーン" data-group="tone" aria-pressed="false">熱意重視</button>
+              </div>
+            </div>
+          </div>
+        </details>
+
         <div class="row">
           <div class="field">
             <label>応募職種 <span class="hint">（必須）</span></label>
@@ -149,28 +171,6 @@
             <label>入社後にやりたいこと <span class="mark rec">推奨</span></label>
             <textarea data-field="入社後にやりたいこと" placeholder="例：まずは配送ルートの改善から取り組みたい"></textarea>
             <p class="hint sub2">※ ここはご自身の言葉で。AIは代筆しません。</p>
-          </div>
-        </details>
-
-        <details class="adv">
-          <summary>詳細設定（文字数の目安・トーン）<span class="hint">　初期設定：短め 200〜300字／フォーマル</span></summary>
-          <div class="row">
-            <div class="field">
-              <label>文字数の目安</label>
-              <div class="chips">
-                <button type="button" class="chip" data-field="文字数" data-group="len" data-value="200〜300字" aria-pressed="true">短め 200〜300</button>
-                <button type="button" class="chip" data-field="文字数" data-group="len" data-value="300〜500字" aria-pressed="false">普通 300〜500</button>
-                <button type="button" class="chip" data-field="文字数" data-group="len" data-value="500〜800字" aria-pressed="false">長め 500〜800</button>
-              </div>
-            </div>
-            <div class="field">
-              <label>トーン</label>
-              <div class="chips">
-                <button type="button" class="chip" data-field="トーン" data-group="tone" aria-pressed="true">フォーマル</button>
-                <button type="button" class="chip" data-field="トーン" data-group="tone" aria-pressed="false">カジュアル</button>
-                <button type="button" class="chip" data-field="トーン" data-group="tone" aria-pressed="false">熱意重視</button>
-              </div>
-            </div>
           </div>
         </details>
 

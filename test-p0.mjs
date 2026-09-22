@@ -283,8 +283,12 @@ ok(/新卒は「学生時代の経験→仕事への接続」、転職は「前�
 ok(/情報が足りない箇所は【 】のまま残します/.test(index), "P0-1: 半升级の検証可能な表現が残っている");
 
 /* ================= 5. P0-2 フォーム減負 ================= */
-ok(/<details class="adv">/.test(index), "P0-2: 詳細設定が折りたたみになっている");
-const advBlock = (index.match(/<details class="adv">([\s\S]*?)<\/details>/) || [, ""])[1];
+// 2026-09-22 ユーザー指示: 詳細設定はフォーム下部の折りたたみから、応募種別の直後へ移動し
+// 初期展開（open）。通る途中で文字数・トーンを「順に」選べるようにする。
+ok(/<details class="adv"[^>]*\bopen\b>/.test(index), "P0-2: 詳細設定は初期展開（open）で見えている");
+ok(index.indexOf('<details class="adv"') >= 0 && index.indexOf('<details class="adv"') < index.indexOf('data-field="職種"'),
+  "P0-2: 詳細設定は必須入力（応募職種・企業名）より上に置く（順路の途中で選べる）");
+const advBlock = (index.match(/<details class="adv"[^>]*>([\s\S]*?)<\/details>/) || [, ""])[1];
 ok(/data-field="文字数"/.test(advBlock) && /data-field="トーン"/.test(advBlock),
   "P0-2: 折りたたみの中に文字数とトーンが入っている");
 ok(/aria-pressed="true"/.test(advBlock), "P0-2: 折りたたんでも初期値が選ばれている（既定のまま送れる）");
