@@ -358,6 +358,48 @@ ok(/接続できませんでした/.test(compSrc) && compSrc.indexOf("message: \
 ok(/message\(st, d\.message \|\| "法人データに見つかりませんでした/.test(read("assets/js/engine.js")),
   "engine.js: 検索成功・候補0件はサーバの message を優先して出す");
 
+/* --- 正規化再試行（2026-09-22）: 後置「〇〇株式会社」・ひらがな入力は部分一致で落ちる --- */
+const norm = gbizLib.normalizeCompanyName;
+eq(norm("株式会社テスト"), "テスト", "norm: 前置の株式会社を剥がす");
+eq(norm("テスト株式会社"), "テスト", "norm: 後置の株式会社を剥がす（登記前置との不一致を埋める）");
+eq(norm("りくるーと"), "リクルート", "norm: ひらがな→カタカナ");
+eq(norm(" テスト 株式会社 "), "テスト", "norm: 空白除去＋前後剥がし");
+eq(norm("テスト"), "テスト", "norm: 変化なしはそのまま（再試行しない判定に使う）");
+// 404 → 正規化クエリで再試行 → 200 なら候補を採用
+{
+  const prevFetch = globalThis.fetch;
+  const prevWarn = console.warn;
+  const warnsN = [];
+  console.warn = (...a) => warnsN.push(a.join(" "));
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return calls === 1
+      ? jsonRes(404, { id: null, message: "404 - test", errors: [] })
+      : jsonRes(200, { "hojin-infos": [{ corporate_number: "1010001000001", name: "株式会社サンプル建設", location: "東京都千代田区", status: "-", kind: "301", industry: ["D"] }] });
+  };
+  let R2;
+  try { R2 = await gbizLib.gbizSearch("サンプル建設株式会社"); }
+  finally { globalThis.fetch = prevFetch; console.warn = prevWarn; }
+  eq(calls, 2, "norm-retry: 404 の後に正規化クエリで 2 回目を打つ");
+  ok(R2.ok === true && R2.items.length === 1 && R2.items[0].name === "株式会社サンプル建設",
+    "norm-retry: 再試行で当たれば候補を採用する（該当なしに倒さない）");
+  ok(R2.diag && R2.diag.retried === true && R2.diag.normalizedQuery === "サンプル建設",
+    "norm-retry: diag に再試行の事実が残る（後から数えられる）");
+  ok(warnsN.some((l) => l.indexOf("[gbiz][RETRY-NORM]") >= 0), "norm-retry: [gbiz][RETRY-NORM] ログが残る");
+}
+// 401 は再試行しない（呼び出し 1 回で諦める＝認証故障を検索で増幅しない）
+{
+  const prevFetch = globalThis.fetch;
+  let calls401 = 0;
+  globalThis.fetch = async () => { calls401++; return jsonRes(401, { id: null, message: "401 - test", errors: [] }); };
+  let R3;
+  try { R3 = await gbizLib.gbizSearch("架空重工業株式会社"); }
+  finally { globalThis.fetch = prevFetch; }
+  eq(calls401, 1, "norm-retry: 401 は再試行しない（1 回で返る）");
+  ok(R3.ok === false && R3.error === "http-401", "norm-retry: 401 は失敗のまま（該当なしに化けさせない）");
+}
+
 /* ================= 4. P-1-3 反捏造ルール ================= */
 ok(/【厳守ルール：経歴・実績・企業情報の捏造禁止】/.test(gen), "不捏造ルールの見出しがある");
 ok(/人のための技術/.test(gen), "実測で再現した偽スローガンを禁止例として明記している");

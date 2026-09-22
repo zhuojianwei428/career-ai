@@ -92,6 +92,31 @@ function emptyDiag(step) {
 
 // 法人名で検索し、候補を返す。選ばせるための情報（法人名/所在地/法人番号/状態/業種/設立）だけを返す。
 // ここで1件に絞り込んではいけない —— 同名の別法人が実在するため、選ぶのは利用者でなければならない。
+
+// ユーザー入力と登記名の書きズレを埋める正規化（2026-09-22 実測に基づく）。
+// v2 の name 検索は部分一致だが「入力列が登記名の部分文字列」である必要がある:
+//   - 後置入力「〇〇建設株式会社」は登記「株式会社〇〇建設」に**一致しない**（部分文字列でない）
+//   - ひらがな入力「りくるーと」はカタカナ登記名「リクルート」に一致しない
+//   - 全角英数・スペースの揺れも一致を阻害する
+// 正規化は決定論的（文字種の写像と語の除去のみ）。モデルに推測させない —— 推測は捏造の入口。
+export function normalizeCompanyName(q) {
+  let s = String(q || "").normalize("NFKC").replace(/\s+/g, "");
+  // ひらがな→カタカナ（登記名はカタカナが主）
+  s = s.replace(/[\u3041-\u3096]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) + 0x60); });
+  // 前後の会社種別語を安定するまで剥がす（「株式会社〇〇株式会社」等の二重表記も潰す）
+  const TYPES = ["株式会社", "有限会社", "合同会社", "合名会社", "合資会社",
+    "一般社団法人", "一般財団法人", "社会福祉法人", "学校法人", "医療法人", "宗教法人", "特定非営利活動法人"];
+  let prev = "";
+  while (prev !== s) {
+    prev = s;
+    for (const t of TYPES) {
+      if (s.length > t.length && s.indexOf(t) === 0) s = s.slice(t.length);
+      if (s.length > t.length && s.lastIndexOf(t) === s.length - t.length) s = s.slice(0, s.length - t.length);
+    }
+  }
+  return s;
+}
+
 export async function gbizSearch(name) {
   const diag = emptyDiag();
   if (!gbizToken()) {
@@ -103,8 +128,26 @@ export async function gbizSearch(name) {
   const q = (name || "").trim();
   if (!q) { diag.step = "empty-name"; return { ok: false, status: null, error: "empty-name", diag: diag, items: [] }; }
   diag.step = "search";
-  const search = await gbizGet("?name=" + encodeURIComponent(q));
-  diag.status = search.status;
+  let res = await gbizGet("?name=" + encodeURIComponent(q));
+  diag.status = res.status;
+  // 「空」の判定: 404（該当なしの回答）or 200 で空リスト。ここだけを再試行の対象にする。
+  // 401（認証失敗）/ 500（ルート未マッチ）/ 429（レート制限）は再試行せず失敗のまま返す
+  // （該当なしに化けさせない方針は 404 修正時と同じ。壊さない）。
+  const isEmpty = function (r) {
+    return (!r.ok && r.status === 404) || (r.ok && Array.isArray(r.data) && r.data.length === 0);
+  };
+  if (isEmpty(res)) {
+    const nq = normalizeCompanyName(q);
+    if (nq && nq !== q) {
+      diag.retried = true;
+      diag.normalizedQuery = nq;
+      console.warn("[gbiz][RETRY-NORM] name=" + q + " -> " + nq);
+      const res2 = await gbizGet("?name=" + encodeURIComponent(nq));
+      diag.status = res2.status;
+      if (!isEmpty(res2)) res = res2;   // 再試行で当たったらそちらを採用
+    }
+  }
+  const search = res;
   // 「該当なし」だけを正常系として通す。ただし通すのは **404 のときだけ**。
   // 401（認証失敗）/ 500（ルート未マッチ）/ 429（レート制限）/ 通信失敗は失敗のまま返す ——
   // 404 を無条件に「無登録」と決めつけると、将来トークン失効やルート変更が 404 を返したときに
