@@ -540,6 +540,7 @@ mark.ph {
 .company-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
 label.company-item {
   display: flex; gap: 0.55rem; align-items: flex-start;
+  flex: 0 0 auto;   /* 候補が多いと flex-shrink で min-height まで圧縮され中身が枠外へ溢れる（2026-09-22 実測）。スクロールはリスト側で行う */
   background: var(--surface); border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm); padding: 0.5rem 0.6rem; cursor: pointer;
   min-height: 2.75rem;                     /* touch-targets */
