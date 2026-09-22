@@ -8,3 +8,7 @@ node_modules
 
 # vercel build cache
 .vercel
+
+# 測定スクリプトの実行成果物（再生成される）
+_measure-cache.json
+_measure-report.json

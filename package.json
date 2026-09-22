@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "npx serve .",
     "check": "node --check assets/js/engine.js",
+    "measure": "node measure-holes.mjs",
     "test": "npm run check && node test-p0.mjs && node test-p1-baseline.mjs && node test-seo-lp.mjs && node test-auth-e2e.mjs && node test-redis-outage.mjs && node test-redis-env-names.mjs && node test-ratelimit.mjs && node test-fallback.mjs"
   },
   "dependencies": {
