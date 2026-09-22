@@ -476,7 +476,9 @@ mark.ph {
 }
 .company-box[hidden] { display: none; }
 .company-head { font-size: 0.82rem; color: var(--ink-soft); margin: 0 0 0.5rem; }
-.company-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.company-list { display: flex; flex-direction: column; gap: 0.4rem; max-height: 20rem; overflow-y: auto; padding-right: 0.25rem; }
+.company-list::-webkit-scrollbar { width: 0.5rem; }
+.company-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
 .company-item {
   display: flex; gap: 0.55rem; align-items: flex-start;
   background: var(--surface); border: 1px solid var(--line-strong);
