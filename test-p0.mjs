@@ -268,11 +268,11 @@ const advBlock = (index.match(/<details class="adv">([\s\S]*?)<\/details>/) || [
 ok(/data-field="文字数"/.test(advBlock) && /data-field="トーン"/.test(advBlock),
   "P0-2: 折りたたみの中に文字数とトーンが入っている");
 ok(/aria-pressed="true"/.test(advBlock), "P0-2: 折りたたんでも初期値が選ばれている（既定のまま送れる）");
-eq((index.match(/data-field="応募種別"/g) || []).length, 4, "P0-2: 応募種別は4種のまま（構造を変えていない）");
+eq((index.match(/data-field="応募種別"/g) || []).length, 3, "P0-2: 応募種別は3種（新卒・転職・バイト、進学は廃止）");
 ok(/\.adv summary \{[\s\S]{0,200}?min-height: 2\.5rem/.test(css), "P0-2: 折りたたみの見出しもタップ領域を確保");
 // 動的プレースホルダ
 ok(/var SCENE_PLACEHOLDERS = \{/.test(eng), "P0-2: 応募種別ごとのプレースホルダ表がある");
-for (const s of ["新卒", "転職", "バイト", "進学"]) ok(eng.indexOf('"' + s + '": {') >= 0, "P0-2: " + s + " 用の文言がある");
+for (const s of ["新卒", "転職", "バイト"]) ok(eng.indexOf('"' + s + '": {') >= 0, "P0-2: " + s + " 用の文言がある");
 ok(/function bindDynamicPlaceholders/.test(eng) && /applyScenePlaceholders\(form, c\.getAttribute\("data-value"\)\)/.test(eng),
   "P0-2: 応募種別の切替でプレースホルダが変わる");
 ok(/hint-tags/.test(eng) && /【" \+ t \+ "】/.test(eng), "P0-2: 書くヒントのタグが【 】を挿入する");
