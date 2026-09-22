@@ -94,6 +94,20 @@ window.CareerAI = (function () {
     return !Object.prototype.hasOwnProperty.call(SECTION_LABELS, s);
   }
 
+  /* 穴を「主观动机类 / 客観事実类」の2種に分類する（2026-09-22 の赤線 #1 運用）。
+   * 主观动机类：事業内容への共感・志望理由・入社後にやりたいこと・自己PR 等、事実としては
+   *   存在せず「あなただけが書ける」もの。ここをAIが埋める＝面接で「具体的にどこが？」と
+   *   問われた瞬間に破綻する捏造。よって**補完UIでも一切代筆せず、型だけ提示**。
+   * 客観事実类：事業内容・企業名・職務経験・保有スキル等、利用者が入力済み・または公開情報から
+   *   書けるもの。具体的事実（業務の中身・数字）を促す。
+   * 分類は補完モーダルの案内を切り替えるために使い、穴の残り数などの判定には使わない。 */
+  function holeCategory(label) {
+    const s = (label || "").trim();
+    if (/共感|志望|やりたい|入社後|自己PR|強み|なぜ|興味|動機|想い|魅力|貢献したい|関わりたい|働きたい|熱意|こだばり|理由|価値観|やりがい|思い/.test(s)) return "subj";
+    if (/事業内容|企業名|職務|経験|スキル|成果|学び|エピソード|資格|担当|保有|実績|沿革|取扱|サービス|商品|専門|技術/.test(s)) return "obj";
+    return "?";
+  }
+
   function toParagraphs(text) {
     const safe = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     // 【…】プレースホルダを強調（不捏造の証拠）。穴埋め対象のものだけ操作可能にする。
@@ -393,7 +407,11 @@ window.CareerAI = (function () {
   /* ================= 【 】をクリックで埋める（P0-3） =================
    * 「穴が残っている」を欠点で終わらせず、その場で埋められるようにする。
    * モーダルの見た目は .auth-modal の CSS をそのまま使う（新規デザインを増やさない）。 */
-  var phModal = null, phTarget = null;
+  var phModal = null, phTarget = null, phOpenCount = 0, phUnknownCount = 0;
+  // 频控：同じセッションで何度も穴を埋めるとき、5回目以降は「例句・詳しい説明」だけを省く。
+  // 信任锚点（「AIは代筆しません」＋主客観ラベ）は省かない——消すと「今回はAIが書いてくれるはず」
+  // と勘違いし、代筆を待つよう誘導してしまう（赤線#1 の逆走）。
+  var PH_GUIDE_TRIM_AFTER = 5;
 
   function ensurePhModal() {
     if (phModal) return phModal;
@@ -405,8 +423,9 @@ window.CareerAI = (function () {
       '<div class="auth-card" role="dialog" aria-modal="true" aria-label="空欄を埋める">' +
         '<button type="button" class="auth-x" data-ph-close="1" aria-label="閉じる">×</button>' +
         '<p class="ph-label" id="ph-label"></p>' +
-        '<p class="ph-hint">この空欄に入れる内容を書いてください。書いた内容がそのまま文章に入ります。事実に関わる数字は、ご自身が確認できるものだけを書いてください。</p>' +
-        '<textarea id="ph-input" rows="4" placeholder="例：学園祭の予約管理システムを友人2人と開発し、100件以上の予約を手作業なしで処理できるようにした"></textarea>' +
+        '<span class="ph-kind" id="ph-kind"></span>' +
+        '<div class="ph-guidance" id="ph-guidance"></div>' +
+        '<textarea id="ph-input" rows="4" placeholder=""></textarea>' +
         '<p class="auth-err" id="ph-err"></p>' +
         '<div class="ph-actions">' +
           '<button type="button" class="btn block" id="ph-save">この内容を反映</button>' +
@@ -435,11 +454,58 @@ window.CareerAI = (function () {
     ensurePhModal();
     phTarget = mark;
     const label = (mark.textContent || "").replace(/^【|】$/g, "");
+    const raw = holeCategory(label);
+    // 未知ラベル（「?」）は保守的に「主观」扱い（赤線#1 の非対称リスク）：
+    // ・誤って客観と判断 → 事実の例を出す → 利用者が動機の代わりに事業内容を書くよう誘導 ＝ 捏造共感と同罪。
+    // ・誤って主观と判断 → 最坏でも「もう1文書かせる」だけで、赤線には触れない。
+    // よって「?」は必ず主观に落とす（安全側）。同時に「?」の増加を打点する——
+    // ある日突然増えれば、モデルが新しいラベル型を出力した信号（分類表の更新が必要）。
+    let cat = raw;
+    if (raw === "?") {
+      phUnknownCount++;
+      console.log("[ph][unknown-category] label=\"" + label + "\" total=" + phUnknownCount);
+      cat = "subj";
+    }
+    phOpenCount++;
+    // 信任锚点（「AIは代筆しません」＋主客観ラベ）は常に表示。
+    // 频控は「例句・詳しい説明」だけを省く——5回目以降も锚点は絶対に消さない。
+    const verbose = phOpenCount <= PH_GUIDE_TRIM_AFTER;
     phModal.querySelector("#ph-label").textContent = "【" + label + "】を埋める";
-    phModal.querySelector("#ph-input").value = "";
+    const kind = phModal.querySelector("#ph-kind");
+    const guide = phModal.querySelector("#ph-guidance");
+    const input = phModal.querySelector("#ph-input");
+    if (cat === "subj") {
+      // 主观动机类：あなただけが書ける。AIは型だけ示し、絶対に代筆しない。
+      kind.textContent = "動機・思い（あなただけが書けます）";
+      kind.className = "ph-kind ph-kind-subj";
+      // 信任锚点：常に「AIは代筆しません」（省かない）
+      let html = '<b>AIは代筆しません。</b>';
+      if (verbose) {
+        html += ' 面接で「具体的にどこが響きましたか？」と問われるので、ここはご自身の言葉で埋めてください。<br>書き方の型：<br><span class="ph-frame">貴社の◯◯という取り組みに、△△という点で共感しました</span>';
+      } else {
+        html += ' ご自身の言葉で埋めてください。';
+      }
+      guide.innerHTML = html;
+      input.placeholder = "例：貴社の地域に密着したリフォーム事例に、暮らしに寄り添う姿勢に共感しました";
+    } else {
+      // 客観事実类（防御的実装：実測 0/14 で未検証。将来データソースが変わり客観類の穴が出たときに発動）。
+      // 具体的事実（業務の中身・数字）を促す。抽象形容はNG。
+      kind.textContent = "事実・経験（入力した内容から）";
+      kind.className = "ph-kind ph-kind-obj";
+      // 信任锚点：事実も「ご入力からのみ」であることを常に宣言（客観だからこそ「AIが埋めてくれる」誤認を防ぐ）
+      let html = '<b>AIは代筆しません。</b>（事実もご入力からのみ）';
+      if (verbose) {
+        html += ' 具体的な事実を入れてください。抽象的な形容（「すばらしい会社」等）ではなく、<strong>業務の中身や数字</strong>を。<br>書き方の型：<br><span class="ph-frame">木造住宅の設計・施工／自動車部品のプレス加工</span>';
+      } else {
+        html += ' 具体的な事実（業務の中身・数字）を入れてください。';
+      }
+      guide.innerHTML = html;
+      input.placeholder = "例：木造住宅の設計・施工、チーム5人で企画を進めた";
+    }
+    input.value = "";
     phModal.querySelector("#ph-err").textContent = "";
     phModal.hidden = false;
-    setTimeout(function () { phModal.querySelector("#ph-input").focus(); }, 30);
+    setTimeout(function () { input.focus(); }, 30);
   }
 
   function closePhModal() {
@@ -746,6 +812,14 @@ window.CareerAI = (function () {
         group.appendChild(row);
       });
       st.box.appendChild(group);
+
+      // 情報密度の補足（ユーザーの「所在地だけで本社と子会社を見分けられない」懸念への対応）。
+      // 法人番号こそ一意の識別子。所在地は登記上の本店所在地であり、実際の勤務地・本社機能と
+      // 異なることがあるため、所在地だけで決めず法人番号でも照合するよう促す。
+      const hint = document.createElement("p");
+      hint.className = "company-hint";
+      hint.textContent = "法人番号は一意の識別子です。所在地は登記上の本店所在地で、実際の勤務地や本社機能と異なる場合があります。迷ったら、ご自身がご存知の法人番号で照合してください。";
+      st.box.appendChild(hint);
 
       const btns = document.createElement("div");
       btns.className = "company-actions";

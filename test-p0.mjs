@@ -310,6 +310,16 @@ ok(/data-fill-ph/.test(eng) && /【 】を埋める（" \+ n \+ "）/.test(eng),
 ok(/createTextNode\(value\)/.test(eng) && /replaceChild\(text, phTarget\)/.test(eng),
   "P0-3: 反映後は mark を外して素のテキストにする（印刷・コピーに装飾が残らない）");
 ok(/mark\.ph \{\n  background: color-mix/.test(css), "P0-3: 穴埋めの強調表示は従来どおり");
+// 【 】は「主観的動機」と「客観的事実」の2種に分け、埋め方の導線を変える（赤線#1の正しい執行）。
+// 主観（共感・志望・やりたい）は空のままが正解 → AIは代筆せず、型だけ出す。
+// 客観（事業内容・経験・スキル）は入力した事実を書く → 具体的な例を出す。
+ok(/function holeCategory\(/.test(eng), "P0-3: 【 】を主観/客観の2類に分類する");
+ok(/ph-kind-subj/.test(eng) && /ph-kind-obj/.test(eng), "P0-3: 主観・客観で異なる案内バッジを出す");
+ok(/AIは代筆しません/.test(eng), "P0-3: 主観（動機）は『AIは代筆しません』と明示（捏造共感を防ぐ）");
+ok(/貴社の◯◯という取り組みに、△△という点で共感しました/.test(eng), "P0-3: 主観には感情表現の型（フレーム）を出す");
+ok(/木造住宅の設計・施工/.test(eng), "P0-3: 客観には具体的事実の例（抽象形容ではなく）を出す");
+ok(/var PH_GUIDE_TRIM_AFTER = 5/.test(eng) && /phOpenCount\+\+/.test(eng),
+  "P0-3: 頻出時に説明を省略する頻控を持つ（書き込みの流れを邪魔しない）");
 // 同一文に穴が2つ以上（prompt を3ラウンド改めても逐字で再出現した形）への層変え対応。
 // prompt ではなく**サーバ側の確定判定**で数を返し、UI は軽く一言だけ添える。
 ok(/function countMultiHoleSentences\(/.test(gen), "P0-3: 同一文の複数穴をサーバ側で確定判定する");
@@ -322,6 +332,25 @@ ok(/\(mh > 0 && phLeft > 0\)/.test(eng),
   "P0-3: 穴が殘っていないときは出さない（「同じ文に2つ」と言う意味が無くなるため）");
 // notice には入れない（捏造ではなく読みやすさの問題なので、利用者を驚かせない）
 ok(!/truncated\)[^\n]*multiHoleSentences/.test(gen), "P0-3: notice ではなく別フィールドで返す（驚かせない）");
+
+/* ================= 6.5 P0-0 企業確認 UI（赤線 #3） ================= */
+// 生成の「前に」企業を特定させる。同名の別法人が実在するため、法人名の自動一致で1社に
+// 決め打ちすると「事実だが別会社の情報」が混ざる（実測：架空の「株式会社ミライテック」が
+// 沖縄の実在同名法人に命中）。生成後ではなく生成前に見せて選ばせるのが唯一の確実な対策。
+ok(/function renderCandidates\(/.test(eng) && /type = "radio"/.test(eng),
+  "P0-0: 候補は手動選択の radio で出す");
+ok(!/\.checked\s*=\s*true/.test(eng),
+  "P0-0: 候補を自動選択しない（checked=true は無い → 冲縄の同名法人もデフォルト選択されない）");
+ok(/radio\.addEventListener\("change"/.test(eng),
+  "P0-0: 選択は利用者の change 操作で確定する（confirmCandidate を呼ぶ）");
+ok(/action: "search"/.test(eng) && /action: "detail"/.test(eng),
+  "P0-0: 企業名で gBizINFO 検索し、選択後に詳細を取得して生成に使う");
+ok(/入力された企業名と企業情報だけで生成します/.test(eng),
+  "P0-0: 候補が無いときは入力情報のみで生成（自動補完・捏造しない）");
+ok(/法人番号は一意の識別子です/.test(eng),
+  "P0-0: 候補リストに「法人番号＝一意識別子」の補足を出す（本店所在地≠勤務地の誤選択を防ぐ）");
+ok(/MAX_CANDIDATES = 20/.test(comp),
+  "P0-0: 候補上限を20件にして、同名の別所在地法人（沖縄等）がリストから切れないようにする");
 
 /* ================= 7. P0-4 全文コピー ================= */
 ok(/data-copy-all/.test(eng), "P0-4: 全文コピーのボタンを生成する");

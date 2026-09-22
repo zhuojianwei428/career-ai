@@ -17,7 +17,10 @@ import { gbizConfigured, gbizSearch, gbizDetail } from "./_lib/gbiz.mjs";
 // 入力の上限。法人名は短いので、長文を渡される余地を残さない。
 const NAME_MIN = 2;
 const NAME_MAX = 60;
-const MAX_CANDIDATES = 10;
+// 同名の別法人が多い社名（実測で1社名につき約10件）では、10件で切ると
+// 沖縄のような「別所在地の実在同名法人」がリストから落ち、手動選択の機会が奪われる。
+// 20件まで見せて、利用者が正しい法人を選べる余裕を持たせる（UI は radio なので多すぎても選べる）。
+const MAX_CANDIDATES = 20;
 
 // 簡易レート制限（プロセス内）。Serverless はインスタンスが使い捨てなので完全な防御ではないが、
 // 単一インスタンスへの連打は止まる。外部APIのトークンを無制限に使い潰されないための最低限。

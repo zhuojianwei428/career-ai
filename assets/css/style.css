@@ -501,6 +501,7 @@ mark.ph {
 .company-facts ul { margin: 0.35rem 0 0 1.1rem; color: var(--ink-soft); }
 .company-facts li { margin: 0.15rem 0; overflow-wrap: anywhere; }
 .company-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+.company-hint { font-size: 0.72rem; color: var(--ink-faint); line-height: 1.55; margin: 0.5rem 0 0; overflow-wrap: anywhere; }
 
 /* ============ P0: 書くヒントのタグ ============ */
 .hint-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-top: 0.4rem; }
@@ -521,7 +522,24 @@ mark.ph {
 
 /* ============ P0: 【 】を埋めるモーダル（.auth-modal の CSS を再利用） ============ */
 .ph-label { font-weight: 700; font-size: 0.95rem; margin: 0 0 0.4rem; overflow-wrap: anywhere; }
-.ph-hint { font-size: 0.78rem; color: var(--ink-soft); margin: 0 0 0.6rem; line-height: 1.6; }
+.ph-kind {
+  display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em;
+  padding: 0.18rem 0.6rem; border-radius: 999px; margin: 0 0 0.5rem;
+  background: var(--surface-2); color: var(--ink-soft);
+}
+.ph-kind-subj { background: oklch(0.96 0.05 55); color: oklch(0.45 0.12 50); }
+.ph-kind-obj  { background: oklch(0.96 0.05 160); color: oklch(0.40 0.10 155); }
+[data-theme="dark"] .ph-kind-subj { background: oklch(0.32 0.06 55); color: oklch(0.86 0.07 60); }
+[data-theme="dark"] .ph-kind-obj  { background: oklch(0.28 0.05 160); color: oklch(0.84 0.06 155); }
+.ph-guidance { font-size: 0.82rem; color: var(--ink-soft); line-height: 1.75; margin: 0 0 0.7rem; }
+.ph-guidance strong { color: var(--ink); font-weight: 700; }
+.ph-guidance b { color: var(--brand); }
+.ph-frame {
+  display: block; margin: 0.45rem 0 0; padding: 0.45rem 0.65rem;
+  background: var(--surface-2); border-left: 3px solid var(--brand);
+  border-radius: var(--radius-sm); color: var(--ink); font-size: 0.8rem; line-height: 1.65;
+}
+[data-theme="dark"] .ph-frame { background: oklch(0.26 0.01 250); }
 #ph-input {
   width: 100%; font: inherit; padding: 0.6rem 0.7rem; border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); line-height: 1.7;
