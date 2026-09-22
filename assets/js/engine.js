@@ -144,6 +144,35 @@ window.CareerAI = (function () {
     }
   }
 
+  /* P0-5: 生成時にログインを求めたときの「保留中の生成」。
+   * ログイン完了後に同じ条件で自動再開する（＝もう一度ボタンを押させない）。
+   * 入力内容は保持の必要がない —— ログインはオーバーレイでフォームを再描画しないため、
+   * DOM の値がそのまま残っている。ここで保持するのは「何を生成しようとしたか」だけ。 */
+  var pendingGenerate = null;
+  function resumePendingGenerate() {
+    const p = pendingGenerate;
+    pendingGenerate = null;
+    if (!p) return;
+    generate(p.formId, p.resultId, p.config);
+  }
+
+  /* P0-5（改）: ログインを求めるのは「匿名の上限に達した瞬間」だけ。
+   * 毎回の生成で門を出すと、既定の匿名枠（未ログイン2回/日）が一度も使われず、
+   * 新規訪問者が価値を見る前に登録を求められて離脱する —— 新規サイトでは
+   * 行動データが貯まらず順位にも不利。まず価値を渡し、上限に当たった時に登録を促す。
+   * 上限の判定はサーバ（匿名はCookie・ログイン中はRedis）が唯一の正。クライアントで数え直さない。
+   * 認証ストアが使えないときは門を作らない（入口を塞ぐと全員が生成不能になる＝劣化ではなく全停止）。 */
+  /* この関数は「上限に達した」ときだけ呼ばれる。以前は残り 0 回でも
+   * 「あと0回、ログインなしで生成できます。」と出していて、できる/できないが
+   * 文面上で矛盾していた（実装＝もう生成できない）。到達を事実として述べる形にする。
+   * 「2回」は実装値（Auth.limits().anon）から取る —— 手で書くと上限を変えた時に
+   * 文言だけ古くなり、約束と実装がずれる。 */
+  function loginOfferText() {
+    const lim = (Auth && Auth.limits && Auth.limits()) || {};
+    const a = lim.anon || 2, l = lim.logged || 5;
+    return "本日のログインなしでの生成は上限（" + a + "回）に達しました。ログインすると入力内容はそのまま引き継がれ、1日" + l + "回まで生成できます。";
+  }
+
   async function generate(formId, resultId, config) {
     const form = document.getElementById(formId);
     const result = document.getElementById(resultId);
@@ -156,6 +185,10 @@ window.CareerAI = (function () {
       setStatus("入力が足りない項目があります：「" + missing.join("、") + "」", "warn");
       return;
     }
+
+    // P0-5（改）: ここではログインを求めない。未ログインでも匿名枠（既定2回/日）の範囲で
+    // そのまま生成できる。門は「上限に達した」応答（下の 429 分岐）でだけ開く。
+    // 理由: 毎回弾くと匿名枠が架空になり、価値を見る前の登録要求で訪問者が離脱する。
 
     // P0-0: 企業の確認が済むまで生成させない（確認済みの法人番号だけを送る）。
     // 同名の別法人に当たると「事実だが別会社」の情報が混ざり、利用者はより気づきにくい。
@@ -210,13 +243,31 @@ window.CareerAI = (function () {
       });
       const data = await res.json();
       if (res.status === 429 && data && data.limitReached) {
-        setStatus(data.error || "本日の生成上限に達しました。", "warn");
-        if (btn) { btn.disabled = true; btn.innerHTML = "本日の上限に達しました"; }
         // 上限到達＝登録の動機が最も高い瞬間。ここを分母に登録率を見る。
         track("limit_reached", {
           tool: config.tool || "custom",
           logged_in: (Auth && Auth.isLoggedIn && Auth.isLoggedIn()) ? 1 : 0
         });
+        // P0-5（改）: 匿名の枠を使い切った「この瞬間」だけログインを促す。
+        // 入力はモーダル（フォームを再描画しないオーバーレイ）の後ろにそのまま残り、
+        // ログインが済んだら resumePendingGenerate() が同じ生成を自動で再開する。
+        // ストア未設定/障害時はここも開かない（門を作ると誰も生成できなくなる）。
+        if (Auth && Auth.limits && Auth.isLoggedIn && Auth.limits().configured && !Auth.isLoggedIn()) {
+          pendingGenerate = { formId: formId, resultId: resultId, config: config };
+          track("generate_login_required", {
+            tool: config.tool || "custom",
+            has_company: vals["企業名"] ? 1 : 0,
+            has_jd: vals["企業情報"] ? 1 : 0,
+            remaining: 0
+          });
+          setStatus(loginOfferText(), "warn");
+          // 押した瞬間に無効化したボタンを戻す（ログイン後の自動再開のため）
+          if (btn) { btn.disabled = false; if (btn.dataset.label) btn.innerHTML = btn.dataset.label; }
+          Auth.openModal();
+          return;
+        }
+        setStatus(data.error || "本日の生成上限に達しました。", "warn");
+        if (btn) { btn.disabled = true; btn.innerHTML = "本日の上限に達しました"; }
         return;
       }
       if (!res.ok || !data.text) {
@@ -1100,6 +1151,9 @@ window.CareerAI = (function () {
   var Auth = (function () {
     var state = { loggedIn: false, email: null, configured: true, emailConfigured: true, anonLimit: 2, loggedLimit: 5 };
     var modal = null;
+    // ログイン/登録完了/ログアウトで呼ぶフック。P0-5 の「生成時にログイン → そのまま再開」に使う。
+    // 未設定なら何もしない（以前は未宣言の自由変数を typeof で呼んでおり、実際には誰も掴んでいなかった）。
+    var onAuthChange = null;
 
     async function me() {
       try {
@@ -1165,8 +1219,10 @@ window.CareerAI = (function () {
       if (state.loggedIn) {
         note.textContent = "ログイン中：1日最大" + l + "回まで生成でき、履歴はマイページに保存されます。";
       } else if (state.configured) {
-        note.textContent = "ログイン不要・本日最大" + a + "回まで。ログインすると1日" + l + "回まで、かつ生成履歴を保存できます。";
+        // P0-5（改）: 入力も生成も、まずは匿名枠の範囲で試せる。ログインを求めるのは上限に当たった時だけ。
+        note.textContent = "入力も生成も、まずは" + a + "回までログインなしで試せます（ログインで1日" + l + "回・履歴も保存）。";
       } else {
+        // 認証ストアが使えないときは門を作らない（作ると誰も生成できなくなる）。この時は匿名の上限が効く。
         note.textContent = "ログイン不要・本日最大" + a + "回まで。";
       }
     }
@@ -1411,11 +1467,13 @@ window.CareerAI = (function () {
       me();
     }
 
-    return { init: init, me: me, login: doLogin, register: doRegister, logout: logout, saveRecord: saveRecord, isLoggedIn: isLoggedIn, limits: limits, openModal: openModal };
+    return { init: init, me: me, login: doLogin, register: doRegister, logout: logout, saveRecord: saveRecord, isLoggedIn: isLoggedIn, limits: limits, openModal: openModal, onChange: function (fn) { onAuthChange = fn; } };
   })();
 
   // 生成成功時にログイン中なら記録を保存
   Auth.init(); // 全ページでナビにログインボタンを注入し、状態を取得
+  // P0-5: ログインを理由に止めた生成を、ログイン完了後に自動で再開する
+  Auth.onChange(resumePendingGenerate);
 
   // 計測：スタブは同期で用意（load 前のイベントを取りこぼさない）、外部スクリプトだけ load 後
   primeGtag();

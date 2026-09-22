@@ -323,6 +323,48 @@ ok(/querySelectorAll\("\[data-field\]"\)/.test(eng), "P0-2: collect() は data-f
 ok(!/(PRESERVE_FIELDS|KEEP_FIELDS|SAVE_FIELDS|ALLOWED_FIELDS)\s*=/.test(eng),
   "P0-2: 書き込み済みの保持列挙定数なし（未ログイン→生成→ログインでも全フィールド維持）");
 
+/* ===== 5b. P0-5 生成のログイン（匿名枠を使い切った「その瞬間」だけログインを促す） ===== */
+// 匿名でも既定 2 回/日は生成できる。門は「上限に達した」応答でのみ開く ——
+// 毎回の生成で弾くと匿名枠が架空になり（1 回も使えない）、新規サイトは行動データも
+// 貯まらず、価値を見る前の登録要求で離脱する。上限判定はサーバが唯一の正。
+const engFetchIdx = eng.indexOf('await fetch("/api/generate"');
+const engPendingIdx = eng.indexOf("pendingGenerate = { formId: formId, resultId: resultId, config: config }");
+ok(engFetchIdx > 0 && engPendingIdx > engFetchIdx,
+  "P0-5: ログインの門は生成リクエストの前ではなく「上限到達(429)の後」にだけ開く（匿名枠を架空にしない）");
+ok(/res\.status === 429 && data\.limitReached/.test(eng) || /res\.status === 429 && data && data\.limitReached/.test(eng),
+  "P0-5: 門を開く条件はサーバの 429/limitReached（クライアント側で回数を数え直さない）");
+ok(/pendingGenerate\s*=\s*\{\s*formId: formId, resultId: resultId, config: config\s*\}/.test(eng),
+  "P0-5: 上限到達時に生成条件を保留し、ログイン後に自動再開できるようにする");
+ok(/Auth\.openModal\(\)/.test(eng) && /function resumePendingGenerate\(\)/.test(eng),
+  "P0-5: 上限到達時にログインを求め、完了後に同じ生成を再開する（もう一度押させない）");
+ok(/Auth\.onChange\(resumePendingGenerate\)/.test(eng),
+  "P0-5: 再開フックが実際に配線されている");
+ok(/var onAuthChange = null;/.test(eng) && /onChange: function \(fn\)/.test(eng),
+  "P0-5: onAuthChange を宣言して setter 経由で渡す（未宣言の自由変数を typeof で呼ぶ実装を残さない）");
+// 認証ストアが落ちているときに門を作ると、劣化ではなく「全員生成不能」になる。
+ok(/Auth\.limits\(\)\.configured && !Auth\.isLoggedIn\(\)/.test(eng),
+  "P0-5: ストア未設定/障害時は門を作らない（匿名の上限に降格して生成を通す）");
+ok(/generate_login_required/.test(eng), "P0-5: ログイン要求地点を計測（ファネルの分母）");
+// 文案：実装と矛盾しないこと。匿名で使える回数とログイン後の回数を必ず両方出す。
+// 上限到達時の文案は「もう生成できない」という事実を述べる形にする（残り0回を
+// 「できます」で結ぶと、できる/できないが文面上で矛盾する＝赤線）。
+ok(/function loginOfferText\(\) \{\s*const lim = \(Auth && Auth\.limits && Auth\.limits\(\)\) \|\| \{\};\s*const a = lim\.anon \|\| 2, l = lim\.logged \|\| 5;/.test(eng),
+  "P0-5: 上限到達文案の回数は実装値（Auth.limits()）から取る（数字を手書きすると上限変更で文言だけ古くなる）");
+ok(eng.indexOf('本日のログインなしでの生成は上限（" + a + "回）に達しました。ログインすると入力内容はそのまま引き継がれ、1日" + l + "回まで生成できます。') >= 0,
+  "P0-5: 上限到達時は「上限（◯回）に達しました」＋引き継ぎ＋ログイン後の上限を出す");
+ok(eng.indexOf('あと" + remaining + "回、ログインなしで生成できます') < 0,
+  "P0-5: 「あと0回、ログインなしで生成できます」という矛盾した文言を残さない");
+ok(eng.indexOf('入力も生成も、まずは" + a + "回までログインなしで試せます') >= 0,
+  "P0-5: 配额行は「入力も生成も、まずは◯回までログインなしで試せます」");
+ok(index.indexOf("入力も生成も、まずは2回までログインなしで試せます") >= 0,
+  "P0-5: index.html の静的文案も同じ約束（JS 無効でも矛盾しない）");
+ok(eng.indexOf("入力内容はそのまま引き継がれ") >= 0,
+  "P0-5: 入力保持の約束を文言に残す（実測で確認済みの主張）");
+ok(!/生成にはログインが必要/.test(index + eng),
+  "P0-5: 「生成にはログインが必要」という旧文言が残っていない（匿名2回の実装と矛盾するため）");
+ok(!/ログイン不要/.test(index),
+  "P0-5: index.html に「ログイン不要」を残さない（匿名枠の説明は回数つきで行う）");
+
 /* ================= 6. P0-3 【 】の短ラベル化と去歧義 ================= */
 ok(/中身は短いラベルだけ（10〜14文字以内）/.test(gen), "P0-3: 【 】の中身を10〜14文字の短いラベルに限定");
 ok(/【事業内容への共感】【入社後に携わりたい業務】【志望の理由】/.test(gen), "P0-3: 良い例を示している");
