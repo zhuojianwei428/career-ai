@@ -614,6 +614,12 @@ label.company-item {
 #ph-input:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 .ph-actions { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.7rem; }
 
+/* ============ 企業確認モーダル（.auth-modal の CSS を再利用） ============ */
+/* 候補カードはフォーム内ではなくこのモーダル内に出す（2026-09-22）。
+   company-list / company-item は共通定義をそのまま共有。カード幅は .auth-card（min(26rem, 92vw)）に収める。 */
+.company-modal .company-item-meta { overflow-wrap: anywhere; }
+.company-modal .company-list { margin-top: 0.1rem; }
+
 /* ============ P0: モバイルでの全画面編集 ============ */
 /* [hidden] は UA 既定（display:none）だが、作者が display を指定した要素では負ける */
 [data-fill-ph][hidden], .edit-done[hidden] { display: none; }

@@ -202,14 +202,20 @@ window.CareerAI = (function () {
     const cc = CompanyConfirm.get(formId);
     let ccPayload = null;
     if (cc) {
-      if (cc.status() === "searching") {
-        setStatus("企業名の候補を検索しています。数秒お待ちください。", "warn");
+      if (cc.status() === "searching" || cc.status() === "candidates") {
+        setStatus("企業名の候補を確認しています。まもなく選択画面が出ます。", "warn");
         return;
       }
       if (!cc.isResolved()) {
-        setStatus("企業名の候補を確認してください（別会社の情報が混ざるのを防ぐため）。候補が無い場合はそのまま生成できます。", "warn");
-        cc.start();
-        return;
+        // P0-0（改・2026-09-22）: 候補カードはフォーム内に出さない。「生成する」を押した
+        // 瞬間にモーダルで選ばせ、選び終わったら同じ生成を自動で続行する（押し直させない）。
+        // 閉じたら未確認に戻る（次の押下でまた選べる）。
+        setStatus("企業名の候補を確認しています…");
+        const chosen = await cc.ensure();
+        if (!chosen) {
+          setStatus("候補の選択を閉じました。もう一度「生成する」を押すと候補を選べます。", "warn");
+          return;
+        }
       }
       ccPayload = cc.payload();
     }
@@ -749,7 +755,8 @@ window.CareerAI = (function () {
         if (st.selected && (input.value || "").trim() !== st.selected.name) reset(st);
         else if (!st.selected && (st.status === "confirmed" || st.status === "declined" || st.status === "fallback")) reset(st);
       });
-      input.addEventListener("blur", function () { maybeSearch(st); });
+      // 入力欄 blur での自動検索は廃止（2026-09-22 ユーザー指示）:
+      // 候補カードはフォーム内に出さず、「生成する」を押した瞬間にモーダルで選ばせる。
       return st;
     }
 
@@ -770,13 +777,6 @@ window.CareerAI = (function () {
       p.className = "company-msg" + (kind ? " " + kind : "");
       p.textContent = text;
       st.box.appendChild(p);
-    }
-
-    function maybeSearch(st) {
-      const name = (st.input.value || "").trim();
-      if (name.length < 2) return;
-      if (st.status !== "unconfirmed") return;
-      search(st);
     }
 
     async function search(st) {
@@ -826,18 +826,72 @@ window.CareerAI = (function () {
       renderCandidates(st, cands, name);
     }
 
-    function renderCandidates(st, cands, query) {
-      st.box.hidden = false;
-      st.box.innerHTML = "";
-      const head = document.createElement("p");
-      head.className = "company-head";
-      head.textContent = "「" + query + "」に一致する法人が " + cands.length + " 件あります。志望する企業を選んでください（同名の別会社が登録されていることがあります）。";
-      st.box.appendChild(head);
+    /* 候補はフォーム内に出さず、モーダルで選ばせる（2026-09-22 ユーザー指示）。
+     * 入力中にカードが出るとフォームが縦に伸びて入力を遮る。流れは
+     * 「生成する」押下 → モーダルで選択 → そのまま同じ生成を続行。
+     * モーダルの器は .auth-modal の CSS を共有する（ph-modal と同じ方式）。 */
+    var ccModal = null;
 
-      const group = document.createElement("div");
-      group.className = "company-list";
-      group.setAttribute("role", "radiogroup");
-      group.setAttribute("aria-label", "法人の候補");
+    function ensureCcModal() {
+      if (ccModal) return ccModal;
+      ccModal = document.createElement("div");
+      ccModal.className = "auth-modal company-modal";
+      ccModal.hidden = true;
+      ccModal.innerHTML =
+        '<div class="auth-backdrop" data-cc-close="1"></div>' +
+        '<div class="auth-card" role="dialog" aria-modal="true" aria-label="法人の候補を選ぶ">' +
+          '<button type="button" class="auth-x" data-cc-close="1" aria-label="閉じる">×</button>' +
+          '<p class="ph-label">志望する法人を選んでください</p>' +
+          '<p class="company-head" id="cc-head"></p>' +
+          '<div class="company-list" id="cc-list" role="radiogroup" aria-label="法人の候補"></div>' +
+          '<p class="company-hint">法人番号は一意の識別子です。所在地は登記上の本店所在地で、実際の勤務地や本社機能と異なる場合があります。迷ったら、ご自身がご存知の法人番号で照合してください。</p>' +
+          '<div class="company-actions">' +
+            '<button type="button" class="btn ghost mini" id="cc-none">リストに無い／企業情報を使わずに生成する</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(ccModal);
+      ccModal.querySelectorAll("[data-cc-close]").forEach(function (el) {
+        el.addEventListener("click", function () { closeCcModal(false); });
+      });
+      ccModal.querySelector("#cc-none").addEventListener("click", function () {
+        const st = ccModal._st;
+        if (!st) return;
+        st.status = "declined";
+        st.selected = null;
+        st.token++;
+        hide(st);
+        message(st, "企業の登録情報は使わず、入力された企業名と企業情報だけで生成します。", null);
+        setStatus("企業情報を使わずに生成します。", "ok");
+        closeCcModal(true);
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && ccModal && !ccModal.hidden) closeCcModal(false);
+      });
+      return ccModal;
+    }
+
+    function closeCcModal(resolved) {
+      if (!ccModal) return;
+      const st = ccModal._st;
+      ccModal.hidden = true;
+      ccModal._st = null;
+      // 選択せず閉じたときだけ「未確認」へ戻す（選択済みで閉じる場合は選択側で処理済み）
+      if (!resolved && st && st.status === "candidates") {
+        st.status = "unconfirmed";
+        st.selected = null;
+        st.token++;
+        hide(st);
+        if (st.onResolve) { const f = st.onResolve; st.onResolve = null; f(false); }
+      }
+    }
+
+    function renderCandidates(st, cands, query) {
+      ensureCcModal();
+      ccModal._st = st;
+      ccModal.querySelector("#cc-head").textContent =
+        "「" + query + "」に一致する法人が " + cands.length + " 件あります。志望する企業を選んでください（同名の別会社が登録されていることがあります）。";
+      const group = ccModal.querySelector("#cc-list");
+      group.innerHTML = "";
       cands.forEach(function (c) {
         const row = document.createElement("label");
         row.className = "company-item";
@@ -845,7 +899,7 @@ window.CareerAI = (function () {
         radio.type = "radio";
         radio.name = "company-choice";
         radio.value = c.corporateNumber;
-        radio.addEventListener("change", function () { confirmCandidate(st, c, message); });
+        radio.addEventListener("change", function () { confirmCandidate(st, c); });
         const body = document.createElement("span");
         body.className = "company-item-body";
         const nm = document.createElement("strong");
@@ -865,38 +919,17 @@ window.CareerAI = (function () {
         row.appendChild(body);
         group.appendChild(row);
       });
-      st.box.appendChild(group);
-
-      // 情報密度の補足（ユーザーの「所在地だけで本社と子会社を見分けられない」懸念への対応）。
-      // 法人番号こそ一意の識別子。所在地は登記上の本店所在地であり、実際の勤務地・本社機能と
-      // 異なることがあるため、所在地だけで決めず法人番号でも照合するよう促す。
-      const hint = document.createElement("p");
-      hint.className = "company-hint";
-      hint.textContent = "法人番号は一意の識別子です。所在地は登記上の本店所在地で、実際の勤務地や本社機能と異なる場合があります。迷ったら、ご自身がご存知の法人番号で照合してください。";
-      st.box.appendChild(hint);
-
-      const btns = document.createElement("div");
-      btns.className = "company-actions";
-      const none = document.createElement("button");
-      none.type = "button";
-      none.className = "btn ghost mini";
-      none.textContent = "リストに無い／企業情報を使わずに生成する";
-      none.addEventListener("click", function () {
-        st.status = "declined";
-        st.selected = null;
-        st.token++;
-        message(st, "企業の登録情報は使わず、入力された企業名と企業情報だけで生成します。", null);
-        setStatus("企業情報を使わずに生成します。「生成する」を押してください。", "ok");
-      });
-      btns.appendChild(none);
-      st.box.appendChild(btns);
+      ccModal.hidden = false;
     }
 
-    async function confirmCandidate(st, c, msgFn) {
-      const my = ++st.token;
+    async function confirmCandidate(st, c) {
       st.selected = { corporateNumber: c.corporateNumber, name: c.name, location: c.location };
       st.status = "confirmed";
       st.facts = null;
+      st.token++;
+      const my = st.token;
+      // モーダルを先に閉じ、確認結果はフォーム内のボックス（✓確認済み行）に映す
+      if (ccModal) { ccModal.hidden = true; ccModal._st = null; }
       renderConfirmed(st, null, "登録情報を確認しています…");
       // 生成に実際に使う情報を、生成の前に見せる（確認できる状態にする）
       try {
@@ -909,14 +942,16 @@ window.CareerAI = (function () {
         if (my !== st.token) return;
         st.facts = (d && d.ok && d.facts) || null;
         renderConfirmed(st, d && d.note ? d.note : null, st.facts ? null : "登録情報を取得できませんでした。入力された企業名と企業情報だけで生成します。");
-        // 生成待ちの状態条に「候補を確認してください」が残るのを防ぐ（2026-09-22 実測）
-        if (st.facts) setStatus("法人を確認しました。「生成する」を押すと、選んだ法人の登録情報を使って作成します。", "ok");
+        // 生成待ちの状態条に古い文言が残るのを防ぐ（2026-09-22 実測）
+        if (st.facts) setStatus("法人を確認しました。選んだ法人の登録情報を使って作成します。", "ok");
         else setStatus("法人を確認しました。登録情報の取得はできませんでしたが、このまま生成できます。", "warn");
       } catch (e) {
         if (my !== st.token) return;
         renderConfirmed(st, null, "登録情報を取得できませんでした。入力された企業名と企業情報だけで生成します。");
         setStatus("法人を確認しました。登録情報の取得はできませんでしたが、このまま生成できます。", "warn");
       }
+      // モーダル経由で待っている生成があれば、同じ生成を自動で続行させる（押し直させない）
+      if (st.onResolve) { const f = st.onResolve; st.onResolve = null; f(true); }
     }
 
     function renderConfirmed(st, note, warn) {
@@ -971,7 +1006,16 @@ window.CareerAI = (function () {
         return {
           status: function () { return st.status; },
           isResolved: function () { return st.status === "confirmed" || st.status === "declined" || st.status === "fallback"; },
-          start: function () { search(st); },
+          ensure: function () {
+            /* 未確認なら検索 → モーダルで選ばせ、解決したら resolve(true)。
+             * 選択せず閉じたときだけ resolve(false)（呼び出し側は生成を静かに止める）。 */
+            return new Promise(function (resolve) {
+              if (st.status === "confirmed" || st.status === "declined" || st.status === "fallback") { resolve(true); return; }
+              if (st.status === "searching" || st.status === "candidates") { resolve(false); return; }
+              st.onResolve = resolve;
+              search(st);
+            });
+          },
           payload: function () {
             if (st.status === "confirmed" && st.selected) {
               return { corporateNumber: st.selected.corporateNumber, name: st.selected.name || null };

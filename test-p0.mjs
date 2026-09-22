@@ -211,7 +211,14 @@ ok(/isResolved: function \(\) \{ return st\.status === "confirmed" \|\| st\.stat
   "P0-0: 「確認済み／該当なし／データベース不可」の3通りで解決扱い（行き止まりを作らない）");
 ok(/radio\.name = "company-choice"/.test(eng), "P0-0: 候補は radio で1社を選ばせる");
 ok(/payload\.gbiz = ccPayload/.test(eng), "P0-0: 確認結果（法人番号）を生成リクエストに載せる");
-ok(/企業名の候補を確認してください/.test(eng), "P0-0: 未確認なら生成を止めて確認を促す");
+// 2026-09-22 改: 候補カードはフォーム内に出さず、「生成する」押下時にモーダルで選ばせ、
+// 選んだら同じ生成を自動続行する（押し直させない）。旧「確認を促して止める」方式は廃止。
+ok(/await cc\.ensure\(\)/.test(eng) && /company-modal/.test(eng) && !/企業名の候補を確認してください/.test(eng),
+  "P0-0: 未確認なら生成押下時にモーダルで確認する（旧フォーム内候補＋押し直し方式は廃止）");
+ok(!/maybeSearch/.test(eng) && !/blur", function \(\) \{ maybeSearch/.test(eng),
+  "P0-0: 入力欄 blur の自動検索は廃止（入力中に候補カードが出ない。P0-2 ヒントの blur は別物）");
+ok(/同じ生成を自動で続行させる/.test(eng) && /st\.onResolve/.test(eng),
+  "P0-0: モーダルで選んだ後は同じ生成を自動続行する（押し直させない）");
 // 確認・放弃後に主状態条が古い「候補を確認してください」のまま残らないこと（2026-09-22 実測の残像バグ）
 ok((eng.match(/setStatus\("法人を確認しました。/g) || []).length >= 2 && /setStatus\("企業情報を使わずに生成します。/.test(eng),
   "P0-0: 確認成功・取得失敗・リストに無い、の3経路で状態条を更新する（残像を残さない）");
