@@ -477,6 +477,45 @@ ok(/body\.edit-full \.doc \{\s*position: static;/.test(css), "P0-7: 全画面の
 ok(/\[data-fill-ph\]\[hidden\], \.edit-done\[hidden\] \{ display: none; \}/.test(css),
   "[hidden] が display 指定に負けないよう明示している");
 
+// --- P0-7（全面自查・2026-09-22）: 実測で見つかった 5 件のモバイル欠陥を固定する ---
+// ナビ: 320px の実測で .nav-inner が折り返さず、リンク列が 113px に潰れて 5 件が縦積み
+// （ヘッダー 236px ＝ 画面の 42%）。「ログイン」は 23px 幅で縦割れ、副題は 1 文字ずつ折返し。
+ok(css.indexOf(".nav-inner { flex-wrap: wrap; gap: 0 0.5rem; padding-block: 0.25rem; }") >= 0,
+  "P0-7: モバイルではナビを折り返す（リンク列を潰して縦積みにしない）");
+// 1 段で収めるには約 920px 必要。切断を 56rem にすると 900px でもリンクが箱の中で
+// 折り返して 2 行になり文字が切れる（実測）。よって切断は 60rem。
+ok(/@media \(max-width: 60rem\) \{\s*\.nav-inner \{ flex-wrap: wrap;/.test(css),
+  "P0-7: ナビの 2 段化は 60rem から（1 段で収まる約 920px 未満で折返しを止める）");
+ok(css.indexOf("flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;") >= 0,
+  "P0-7: リンク行は横スクロールの 1 行に固定（折り返してヘッダーを高くしない）");
+ok(css.indexOf("order: 3; flex: 1 1 100%; margin-left: 0;") >= 0,
+  "P0-7: リンク行を全幅の 2 段目に置く（ブランド／ログインと同居させない）");
+ok(css.indexOf(".brand small { display: none; }") >= 0,
+  "P0-7: モバイルでは副題を出さない（HTML には残るので SEO 上の消失はない）");
+ok(css.indexOf(".auth-area { flex: 0 0 auto; min-width: 0; }") >= 0,
+  "P0-7: モバイルのログインボタンを潰さない（実測 23px 幅の縦割れを防ぐ）");
+// モーダル: align-items:center ＋ スクロール不可だと、スマホのキーボード表示時に上下が切れて詰む
+ok(css.indexOf("height: var(--vvh, 100vh); overflow-y: auto") >= 0,
+  "P0-7: モーダルは可視領域(--vvh)に追従してスクロールできる（キーボードで送信ボタンが隠れない）");
+ok(css.indexOf("color: var(--ink); margin: auto;") >= 0,
+  "P0-7: center + overflow で上端が切れる挙動を margin:auto で回避");
+ok(css.indexOf(".auth-x { width: 2.75rem; height: 2.75rem;") >= 0,
+  "P0-7: 閉じる「×」の当たり判定を 44px に（実測 36×26px）");
+// 触控目標: 実測 36px / 28px で 44px に届いていなかった
+ok(css.indexOf(".hint-tag { min-height: 2.75rem;") >= 0 && css.indexOf(".hint-tag { min-height: 2.25rem") < 0,
+  "P0-7: ヒントタグを 44px に（実測 36px・従来の 2.25rem を排除）");
+ok(css.indexOf(".faq summary { padding-block: 0.5rem; }") >= 0,
+  "P0-7: FAQ の開閉も 44px の当たり判定に（実測 28px）");
+// iOS は 16px 未満の入力欄にフォーカスすると自動ズームする（＝送信ボタンが画面外へ出る）
+ok(css.indexOf(".auth-form input { font-size: 1rem; }") >= 0,
+  "P0-7: モバイルの入力欄は 16px 以上（実測 13.6px は iOS の自動ズームを招く）");
+// 候補リスト: 小さい端末では 14rem でも画面の 4 割近い
+ok(css.indexOf("@media (max-width: 30rem) {") >= 0 && css.indexOf(".company-list { max-height: 12rem; }") >= 0,
+  "P0-7: 320〜480px では候補リストを 12rem に（14rem は画面の 39%）");
+ok(css.indexOf(".company-list { max-height: 20rem;") < css.indexOf(".company-list { max-height: 14rem; }") &&
+   css.indexOf(".company-list { max-height: 14rem; }") < css.indexOf(".company-list { max-height: 12rem; }"),
+  "P0-7: 候補リストの上限は 20rem → 14rem → 12rem の順に効く（カスケード順が逆だと上書きが崩れる）");
+
 /* ================= 10. P0-8 信任と出典 ================= */
 ok(/企業情報の扱いと、捏造しない仕組み/.test(index), "P0-8: 信任セクションがある");
 ok(/出典：gBizINFO/.test(index), "P0-8: 出典（gBizINFO）を明示");
