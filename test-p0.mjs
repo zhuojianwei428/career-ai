@@ -535,9 +535,9 @@ ok(css.indexOf(".company-list { max-height: 20rem;") < css.indexOf(".company-lis
 
 /* ================= 10. P0-8 信任と出典 ================= */
 ok(/企業情報の扱いと、捏造しない仕組み/.test(index), "P0-8: 信任セクションがある");
-ok(/出典：gBizINFO/.test(index), "P0-8: 出典（gBizINFO）を明示");
-ok(/経済産業省 gBizINFO（政府保有法人データ）/.test(index), "P0-8: データの出所を具体的に書く");
-ok(/法人単位の登録情報です/.test(index), "P0-8: gBizINFO で足りない範囲（募集要項等）を正直に書く");
+ok(!/gBizINFO/i.test(index), "P0-8: 首页は gBizINFO に言及しない（データソース名の秘匿・競合模倣対策。出典は確認モーダル側で表示）");
+ok(/出典：gBizINFO/.test(eng), "P0-8: 出典（gBizINFO）は確認モーダル側で明示（engine.js・全頁共通）");
+ok(/法人データベース/.test(index) && /法人単位の登録情報です/.test(index), "P0-8: データの出所を具体的に書く（名前を出さず「法人データベース」として）");
 ok(/足りない情報は空欄で残します/.test(index), "P0-8: 不捏造の仕組みを説明している");
 ok(/企業情報はどこから取得しますか？/.test(index), "P0-8: 企業情報の入手方法を FAQ にも書く");
 const faqLd = JSON.parse((index.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/) || [, "{}"])[1]);
