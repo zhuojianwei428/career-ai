@@ -532,6 +532,9 @@ ok(css.indexOf("@media (max-width: 30rem) {") >= 0 && css.indexOf(".company-list
 ok(css.indexOf(".company-list { max-height: 20rem;") < css.indexOf(".company-list { max-height: 14rem; }") &&
    css.indexOf(".company-list { max-height: 14rem; }") < css.indexOf(".company-list { max-height: 12rem; }"),
   "P0-7: 候補リストの上限は 20rem → 14rem → 12rem の順に効く（カスケード順が逆だと上書きが崩れる）");
+// 企業候補カードは label なので「.field label」が命中すると display:block に負けて枠が崩れる（2026-09-22 実測事故）。
+ok(/\.field > label \{/.test(css) && !/\.field label \{/.test(css) && /label\.company-item \{[^}]*display: flex/.test(css),
+  "P0-8: 企業候補カードの flex は .field label のブロック化に負けない（.field > label + label.company-item の二重防御）");
 
 /* ================= 10. P0-8 信任と出典 ================= */
 ok(/企業情報の扱いと、捏造しない仕組み/.test(index), "P0-8: 信任セクションがある");
