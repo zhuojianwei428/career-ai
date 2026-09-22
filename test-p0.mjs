@@ -282,8 +282,8 @@ ok(/gentleHintShown/.test(eng) && /経験を入れると、あなた固有の文
 
 // P0-2（中小強誘導）：3 推奨フィールド。減負の手段（タグ/例/折りたたみ）で「より埋める」を促す。
 ok(/class="form-lead">入力が多いほど/.test(index), "P0-2: フォーム上部に価値提案バナー（入力量＝完成度）");
-ok(/<div class="rec-group">/.test(index) && /rec-group-lead/.test(index),
-  "P0-2: 推奨フィールドを強誘導グループで囲っている");
+ok(/<details class="rec-group">/.test(index) && /rec-group-lead/.test(index) && /<summary>推奨：さらに具体的にする 3 項目/.test(index),
+  "P0-2: 推奨フィールドを折りたたみ（details+summary）の強誘導グループで囲っている");
 // 3 フィールドが data-field 付きで存在し、例プレースホルダ付き
 ok(/data-field="事業内容"[^>]*placeholder="例：保育園向けに給食食材の配送を行っている"/.test(index),
   "P0-2: ①事業内容フィールド（例プレースホルダ付き）");

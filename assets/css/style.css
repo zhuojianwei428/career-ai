@@ -155,10 +155,17 @@ a:hover { text-decoration: underline; }
   font-size: 0.85rem; line-height: 1.6;
 }
 .rec-group {
-  margin: 0.5rem 0; padding: 0.85rem;
+  margin: 0.5rem 0; padding: 0.4rem 0.85rem 0.85rem;
   border: 1px solid var(--brand-soft); border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--brand-soft) 35%, var(--surface));
 }
+/* 折りたたみ（details 化）。見出しは .adv summary と同じタップ領域（2.5rem）を確保 */
+.rec-group summary {
+  cursor: pointer; font-weight: 700; font-size: 0.875rem;
+  min-height: 2.5rem;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.25rem;
+}
+.rec-group summary .hint { font-weight: 400; }
 .rec-group-lead {
   margin: 0 0 0.6rem; font-size: 0.78rem; color: var(--ink-faint); line-height: 1.6;
 }

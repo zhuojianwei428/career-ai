@@ -1087,6 +1087,8 @@ window.CareerAI = (function () {
         }
       });
     });
+    // 例が折りたたみ（details: 推奨3項目・詳細設定）の中に入る場合は開いて見えるようにする
+    form.querySelectorAll("details").forEach(function (d) { d.open = true; });
     setStatus("入力例を入れました。このまま生成するか、ご自身の内容に書き換えてください。", "ok");
     track("example_fill", { form: formId });
     const first = form.querySelector("textarea, input[type=text]");
