@@ -159,6 +159,9 @@ const EXPECTED_EVENTS = [
   "generate_start", "limit_reached", "generate_success", "generate_error",
   // P0-5：「押したがログインが要った」地点＝ファネルの分母（ここが最大の離脱点になり得る）
   "generate_login_required",
+  // P0-5：ログイン完了後に同じ生成が自動再開した証拠。登録にメール認証が要るため
+  // 能動検証しづらい経路なので、実利用者のデータで発火を確認できるようにする（静かにさせない）
+  "generate_resumed_after_login",
   "pdf_export", "text_export", "example_fill",
   "login_success", "signup_code_sent", "signup_complete", "logout",
   // P0 で追加：コピーはこのサイト最大の転換点、ph_fill は「空欄を埋めた」＝価値到達の証拠

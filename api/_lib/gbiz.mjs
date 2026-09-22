@@ -53,8 +53,18 @@ async function gbizGet(path) {
     if (!r.ok) {
       let snippet = "";
       try { snippet = (await r.text()).slice(0, 200).replace(/\s+/g, " "); } catch (e) { /* noop */ }
+      // 404 は「その資源・その検索結果が無い」という上流の**回答**でありうる
+      // （実測 2026-09-22: 検索で該当なしのとき gBizINFO は 404 を返す。トヨタは 200・10件）。
+      // これを [gbiz][FAIL] に混ぜると「該当なし」が障害ログとして積み上がり、本物の障害が埋もれる。
+      // 一方 401=認証失敗 / 500=ルート未マッチ / 429=レート制限 とは**別物**なので、
+      // 404 だけを NOTFOUND として分離する（失敗ログからは外すが、warning として必ず残す＝無言にしない）。
+      // 呼び出し側は notFound を見て「正常系の空」と「失敗」を切り分ける。
+      if (r.status === 404) {
+        console.warn("[gbiz][NOTFOUND] HTTP 404 " + url + " body=" + snippet);
+        return { ok: false, status: 404, error: "http-404", data: null, notFound: true };
+      }
       console.error("[gbiz][FAIL] HTTP " + r.status + " " + url + " body=" + snippet);
-      return { ok: false, status: r.status, error: "http-" + r.status, data: null };
+      return { ok: false, status: r.status, error: "http-" + r.status, data: null, notFound: false };
     }
     const j = await r.json();
     // v2 は { "hojin-infos": [...] } 形式だが、配列直返しの可能性も許容する
@@ -71,11 +81,13 @@ async function gbizGet(path) {
 // 診断オブジェクト。意味を固定する:
 //   ok    = 上流（gBizINFO）から**実データが取れた**か。search-empty は「正常だがデータ無し」なので false。
 //   step  = どこで止まったか（no-token / search / search-empty / search-done / detail / detail-empty / …）
+//   notFound = 上流が 404 を返したか。200 で空リストだった「該当なし」と区別するための印
+//              （404 を「該当なし」に倒す判断を後から検証できるようにする。消すと切り分け不能になる）
 // 実測 2026-09-21: gbizSearch が成功時に ok を立てておらず、hits:81 / step:"search-done" なのに
 // diag.ok:false という**自己矛盾した診断**を返していた（detail 側は立てていた）。
 // ログを見て誤診する原因になるので、両関数で同じ意味になるよう統一した。
 function emptyDiag(step) {
-  return { configured: !!gbizToken(), ok: false, step: step || "init", status: null, error: null, hits: 0 };
+  return { configured: !!gbizToken(), ok: false, step: step || "init", status: null, error: null, hits: 0, notFound: false };
 }
 
 // 法人名で検索し、候補を返す。選ばせるための情報（法人名/所在地/法人番号/状態/業種/設立）だけを返す。
@@ -93,6 +105,21 @@ export async function gbizSearch(name) {
   diag.step = "search";
   const search = await gbizGet("?name=" + encodeURIComponent(q));
   diag.status = search.status;
+  // 「該当なし」だけを正常系として通す。ただし通すのは **404 のときだけ**。
+  // 401（認証失敗）/ 500（ルート未マッチ）/ 429（レート制限）/ 通信失敗は失敗のまま返す ——
+  // 404 を無条件に「無登録」と決めつけると、将来トークン失効やルート変更が 404 を返したときに
+  // **認証故障が「その会社は存在しない」に化ける**。利用者は自分の入力ミスだと思い込み、
+  // こちらの障害に気づけない（黙って失敗するより悪い）。
+  // 404 を採用した根拠: 上流は「該当なし」も 404 で返す（実測）／一方で異常系の符号は既に
+  // 別に確定している（401=認証層に到達、500=ルート未マッチ、429=制限）。よって 404 は区別できる。
+  // 万一この前提が崩れても無言にはしない: diag.notFound=true / diag.status=404 と
+  // [gbiz][EMPTY-404] ログが残るので、後から「404 を該当なしに倒した件数」を数えられる。
+  if (!search.ok && search.status === 404) {
+    diag.step = "search-empty";
+    diag.notFound = true;
+    console.warn("[gbiz][EMPTY-404] 該当なしとして扱う name=" + q + "（401/500/429 は失敗のまま）");
+    return { ok: true, status: 404, error: null, diag: diag, items: [] };
+  }
   if (!search.ok) { diag.error = search.error; return { ok: false, status: search.status, error: search.error, diag: diag, items: [] }; }
   if (!Array.isArray(search.data) || !search.data.length) {
     // 法人データに無い（個人事業主・屋号・新設法人など）は正常系。エラー扱いにしない。

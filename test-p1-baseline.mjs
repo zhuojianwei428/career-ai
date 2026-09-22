@@ -312,6 +312,52 @@ const G0 = await runCase("nohole", { GBIZ_API_TOKEN: undefined }, "ok", { confir
 eq(G0.res.payload && G0.res.payload.multiHoleSentences, 0, "G: 穴が無い出力は 0（誤検出しない）");
 ok(!G0.logs.some((l) => l.indexOf("[gen][multi-hole]") >= 0), "G: 0 件のときはログを出さない（ログをノイズで埋めない）");
 
+/* ================= 3b. 「該当なし＝404」の切り分け（実測 2026-09-22） =================
+ * 上流は「該当なし」を HTTP 404 で返す（実測: 架空の法人名→404 / トヨタ→200・10件）。
+ * 404 だけを正常系の空として通す。401/500/429 は失敗のまま —— 無条件に 404 を
+ * 「無登録」と決めつけると、将来トークン失効やルート変更が 404 を返したときに
+ * 認証故障が「その会社は存在しない」に化け、こちらの障害に気づけなくなる。
+ * 404 を「該当なし」に倒す判断ごとロックする（diag.notFound / [gbiz][EMPTY-404] で後から数えられる）。 */
+const gbizLib = await import(new URL("./api/_lib/gbiz.mjs", import.meta.url).href);
+process.env.GBIZ_API_TOKEN = "t".repeat(40);
+async function searchWithStatus(status, warns) {
+  const prevFetch = globalThis.fetch;
+  const prevWarn = console.warn;
+  const prevErr = console.error;
+  console.warn = (...a) => warns.push(a.join(" "));
+  console.error = (...a) => warns.push(a.join(" ")); // [gbiz][FAIL] は error チャネルで出る
+  globalThis.fetch = async () => jsonRes(status, { id: null, message: status + " - test", errors: [] });
+  try { return await gbizLib.gbizSearch("架空重工業株式会社"); }
+  finally { globalThis.fetch = prevFetch; console.warn = prevWarn; console.error = prevErr; }
+}
+// 404 → 正常系の空。生成は止めず、P0-0 の fallback（入力された情報だけで生成）に乗る。
+const N404w = [];
+const N404 = await searchWithStatus(404, N404w);
+ok(N404.ok === true && Array.isArray(N404.items) && N404.items.length === 0,
+  "404: 「該当なし」は正常系の空（ok:true・items:[]）として返り、生成を止めない");
+eq(N404.diag && N404.diag.step, "search-empty", "404: diag.step=search-empty（障害の step=search と区別できる）");
+ok(N404.diag && N404.diag.notFound === true, "404: diag.notFound が立つ（404 を該当なしに倒した件数を後から数えられる）");
+ok(N404.diag && N404.diag.status === 404, "404: diag.status に上流の 404 が残る（可観測性を捨てない）");
+ok(N404w.some((l) => l.indexOf("[gbiz][EMPTY-404]") >= 0), "404: [gbiz][EMPTY-404] ログが残る（黙って処理しない）");
+// 401/500/429 → 失敗のまま。該当なしに化けさせない。
+for (const st of [401, 500, 429]) {
+  const w = [];
+  const R = await searchWithStatus(st, w);
+  ok(R.ok === false && R.error === "http-" + st, st + ": 失敗のまま返る（該当なしに化けさせない）");
+  ok(!(R.diag && R.diag.notFound === true), st + ": notFound は立たない（「無い」という回答とは別物）");
+  ok(w.some((l) => l.indexOf("[gbiz][FAIL]") >= 0), st + ": [gbiz][FAIL] ログが残る");
+}
+// company.js の文言: 404 のときは「接続できませんでした」ではなく「見つかりませんでした」。
+// 上流は接続に成功して「無い」と回答した —— 故障と同じ文言にすると事実と食い違う。
+const compSrc = read("api/company.js");
+ok(compSrc.indexOf("r.diag && r.diag.notFound") >= 0 && compSrc.indexOf("該当する企業が見つかりませんでした") >= 0,
+  "company.js: 404 のとき「該当する企業が見つかりませんでした」を出し分ける");
+ok(/接続できませんでした/.test(compSrc) && compSrc.indexOf("message: \"企業データベースに接続できませんでした") >= 0,
+  "company.js: 真の失敗（401/500/429）は従来どおり「接続できませんでした」");
+// engine.js: サーバの message をそのまま出す経路が残っている（クライアントで上書きしない）
+ok(/message\(st, d\.message \|\| "法人データに見つかりませんでした/.test(read("assets/js/engine.js")),
+  "engine.js: 検索成功・候補0件はサーバの message を優先して出す");
+
 /* ================= 4. P-1-3 反捏造ルール ================= */
 ok(/【厳守ルール：経歴・実績・企業情報の捏造禁止】/.test(gen), "不捏造ルールの見出しがある");
 ok(/人のための技術/.test(gen), "実測で再現した偽スローガンを禁止例として明記している");

@@ -153,6 +153,11 @@ window.CareerAI = (function () {
     const p = pendingGenerate;
     pendingGenerate = null;
     if (!p) return;
+    // 可観測性: 「ログイン後に同じ生成が自動で続いた」は実機で能動検証しづらい（登録にメール認証が要る）。
+    // 静かに通させない —— GA4 イベントと console の両方に残し、実利用者のデータで発火を確認できるようにする。
+    // イベント名は test-seo-lp.mjs の EXPECTED_EVENTS にも登録済み（足し忘れるとテストが落ちる）。
+    track("generate_resumed_after_login", { tool: (p.config && p.config.tool) || "custom" });
+    console.info("[P0-5] ログイン後に保留生成を自動再開 tool=" + ((p.config && p.config.tool) || "custom"));
     generate(p.formId, p.resultId, p.config);
   }
 
@@ -280,7 +285,10 @@ window.CareerAI = (function () {
       refreshDoc();
       // 履歴の保存はサーバ側（/api/generate 内で session がある場合のみ）で行う。
       // ここで再度 POST すると1回の生成で履歴が2件重複するため、クライアントからは保存しない。
-      const rem = (data.remaining != null) ? "（本日あと " + data.remaining + " 回）" : "";
+      // remaining=0 で「あと 0 回」と出すと、直前の上限到達文案（「上限に達しました」）と
+      // 同じ UI で食い違う（まだ生成できるように読める）。0 は事実をそのまま述べる。
+      const rem = (data.remaining == null) ? ""
+        : (data.remaining === 0 ? "（本日の上限に達しました）" : "（本日あと " + data.remaining + " 回）");
       const phLeft = countPh(result);
       // ファネル計測：生成が実際に成果物を返した地点（＝このページの主目的の達成）
       track("generate_success", {
