@@ -886,6 +886,7 @@ window.CareerAI = (function () {
         st.selected = null;
         st.token++;
         message(st, "企業の登録情報は使わず、入力された企業名と企業情報だけで生成します。", null);
+        setStatus("企業情報を使わずに生成します。「生成する」を押してください。", "ok");
       });
       btns.appendChild(none);
       st.box.appendChild(btns);
@@ -908,9 +909,13 @@ window.CareerAI = (function () {
         if (my !== st.token) return;
         st.facts = (d && d.ok && d.facts) || null;
         renderConfirmed(st, d && d.note ? d.note : null, st.facts ? null : "登録情報を取得できませんでした。入力された企業名と企業情報だけで生成します。");
+        // 生成待ちの状態条に「候補を確認してください」が残るのを防ぐ（2026-09-22 実測）
+        if (st.facts) setStatus("法人を確認しました。「生成する」を押すと、選んだ法人の登録情報を使って作成します。", "ok");
+        else setStatus("法人を確認しました。登録情報の取得はできませんでしたが、このまま生成できます。", "warn");
       } catch (e) {
         if (my !== st.token) return;
         renderConfirmed(st, null, "登録情報を取得できませんでした。入力された企業名と企業情報だけで生成します。");
+        setStatus("法人を確認しました。登録情報の取得はできませんでしたが、このまま生成できます。", "warn");
       }
     }
 

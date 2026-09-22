@@ -212,6 +212,9 @@ ok(/isResolved: function \(\) \{ return st\.status === "confirmed" \|\| st\.stat
 ok(/radio\.name = "company-choice"/.test(eng), "P0-0: 候補は radio で1社を選ばせる");
 ok(/payload\.gbiz = ccPayload/.test(eng), "P0-0: 確認結果（法人番号）を生成リクエストに載せる");
 ok(/企業名の候補を確認してください/.test(eng), "P0-0: 未確認なら生成を止めて確認を促す");
+// 確認・放弃後に主状態条が古い「候補を確認してください」のまま残らないこと（2026-09-22 実測の残像バグ）
+ok((eng.match(/setStatus\("法人を確認しました。/g) || []).length >= 2 && /setStatus\("企業情報を使わずに生成します。/.test(eng),
+  "P0-0: 確認成功・取得失敗・リストに無い、の3経路で状態条を更新する（残像を残さない）");
 // 名前を書き換えたら確認を無効化（別会社の法人番号で生成する事故を防ぐ）
 ok(/input\.addEventListener\("input", function \(\) \{[\s\S]{0,220}?reset\(st\)/.test(eng),
   "P0-0: 企業名を書き換えると確認が無効になる");
