@@ -15,7 +15,7 @@ const BASE = "https://www.coverletterkit.com";
 const PAGES = ["index.html", "jiko-pr.html", "rirekisho.html", "shokumu.html", "mensetsu.html"];
 const NOINDEX_PAGES = ["account.html"];
 // ツールではないがインデックスさせたいページ（EXAMPLE やフォームを持たないため PAGES とは分ける）
-const EXTRA_INDEXABLE = ["privacy.html"];
+const EXTRA_INDEXABLE = ["privacy.html", "jirei.html"];
 
 let pass = 0, fail = 0;
 const failures = [];
