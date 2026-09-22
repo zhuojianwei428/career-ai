@@ -462,7 +462,7 @@ for (const p of TOOLS_WITH_COMPANY_REQUIRED) {
 
 /* ================= 8. 既存機能を壊していないか ================= */
 ok(existsSync(new URL("./assets/js/engine.js", import.meta.url)), "engine.js が存在する");
-for (const k of ["function generate(", "function fillExample(", "function track(", "function exportPDF("]) {
+for (const k of ["function generate(", "function fillExample(", "function track("]) {
   ok(eng.indexOf(k) >= 0, "engine.js の " + k + " が残っている");
 }
 for (const p of ALL_PAGES) {

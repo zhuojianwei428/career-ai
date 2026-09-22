@@ -566,14 +566,14 @@ for (const p of ALL_PAGES) {
 for (const p of PAGES) {
   ok(/id="gen-form"/.test(read(p)), p + ": 生成フォームが残っている");
   ok(/id="result"/.test(read(p)), p + ": 結果の器が残っている");
-  ok(idExistsInToolbar(p), p + ": ツールバーが残っている（PDF/テキスト出力の置き場）");
+  ok(idExistsInToolbar(p), p + ": ツールバーが残っている（全文コピーの置き場）");
 }
 function idExistsInToolbar(p) { return /class="toolbar no-print"/.test(read(p)); }
 ok(/const DAILY_LIMIT = 2;/.test(gen), "既存: 匿名の1日2回は据え置き");
 ok(/const LOGGED_DAILY = Number\(process\.env\.LOGGED_DAILY_LIMIT\) \|\| 5;/.test(gen), "既存: ログイン中の上限は据え置き");
 ok(/persistRecord\(session, body\.tool/.test(gen), "既存: 履歴保存はサーバ側のみ（二重保存しない）");
 ok(!/DELETE/.test(read("api/records.js")), "既存: records.js に DELETE を足していない");
-for (const k of ["function generate(", "function fillExample(", "function exportPDF(", "function exportText(", "function setupPhoto("]) {
+for (const k of ["function generate(", "function fillExample(", "function setupPhoto("]) {
   ok(eng.indexOf(k) >= 0, "既存: engine.js の " + k + " が残っている");
 }
 ok(/gbizConfigured\(\)/.test(comp) && /gbizDetail\(/.test(comp), "既存: 企業確認も共有ライブラリ経由で gBizINFO を使う");

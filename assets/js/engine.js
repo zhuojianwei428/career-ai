@@ -2,7 +2,7 @@
  * - 生成: フォーム収集 → /api/generate → 編集可能な文書として表示
  * - 編集: contenteditable でその場で修正
  * - 写真: FileReader でプレビュー（履歴書・職務経歴書）
- * - 出力: ブラウザ印刷で A4/PDF（依存ゼロ）、および .txt 出力
+ * - 出力: 全文コピー（クリップボード・P0-4）
  */
 window.CareerAI = (function () {
   "use strict";
@@ -1070,25 +1070,6 @@ window.CareerAI = (function () {
     });
   }
 
-  function exportPDF() {
-    setStatus("");
-    track("pdf_export", {});
-    window.print();
-  }
-
-  function exportText(resultId) {
-    const result = document.getElementById(resultId);
-    if (!result) return;
-    const text = result.innerText.replace(/ /g, " ");
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "shibou-ai-output.txt";
-    a.click();
-    URL.revokeObjectURL(a.href);
-    track("text_export", {});
-  }
-
   /* 例文の一括投入。
    * 「何を書けばいいか分からない」で離脱する層の入口を作る（試用のハードルを下げる）。
    * 投入するのはあくまで例であって、生成結果ではありません。ユーザーが上書きする前提。 */
@@ -1497,8 +1478,6 @@ window.CareerAI = (function () {
     generate: generate,
     makeEditable: makeEditable,
     setupPhoto: setupPhoto,
-    exportPDF: exportPDF,
-    exportText: exportText,
     chipGroup: chipGroup,
     fillExample: fillExample,
     collect: collect,

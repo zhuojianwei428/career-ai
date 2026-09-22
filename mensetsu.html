@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>面接対策AI｜想定質問・逆質問を無料で作成、編集・PDF出力</title>
-<meta name="description" content="面接対策をAIで自動作成。想定質問の回答構成・逆質問・自己紹介を生成し、その場で編集してPDF出力できます。">
+<title>面接対策AI｜想定質問・逆質問を無料で作成、編集・コピー</title>
+<meta name="description" content="面接対策をAIで自動作成。想定質問の回答構成・逆質問・自己紹介を生成し、その場で編集・コピーできます。">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#eef2ff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1f2433" media="(prefers-color-scheme: dark)">
@@ -12,8 +12,8 @@
 <meta property="og:type" content="website">
 <meta property="og:locale" content="ja_JP">
 <meta property="og:site_name" content="就活AI">
-<meta property="og:title" content="面接対策AI｜想定質問・逆質問を無料で作成、編集・PDF出力">
-<meta property="og:description" content="面接対策をAIで自動作成。想定質問の回答構成・逆質問・自己紹介を生成し、その場で編集してPDF出力できます。">
+<meta property="og:title" content="面接対策AI｜想定質問・逆質問を無料で作成、編集・コピー">
+<meta property="og:description" content="面接対策をAIで自動作成。想定質問の回答構成・逆質問・自己紹介を生成し、その場で編集・コピーできます。">
 <meta name="twitter:card" content="summary">
 <script>
 (function(){try{var t=localStorage.getItem('shibou-theme');if(t!=='dark'&&t!=='light'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();
@@ -45,12 +45,12 @@
 <main id="main" class="wrap">
   <section class="hero">
     <h1>面接対策 AI｜想定質問も逆質問も自己紹介も、<br>その場で編集できる形に</h1>
-    <p class="sub">よく聞かれる質問の回答構成、自分から聞く逆質問、自己紹介をAIが作成。生成後に編集してPDF出力できます。</p>
+    <p class="sub">よく聞かれる質問の回答構成、自分から聞く逆質問、自己紹介をAIが作成。生成後に編集・全文コピーできます。</p>
     <div class="badges">
       <span class="badge">無料</span>
       <span class="badge">登録不要</span>
       <span class="badge">編集可能</span>
-      <span class="badge">PDF出力</span>
+      <span class="badge">全文コピー</span>
     </div>
   </section>
 
@@ -90,8 +90,6 @@
       <p id="status" class="muted" style="min-height:1.2em"></p>
 
       <div class="toolbar no-print">
-        <button class="btn ghost mini" onclick="CareerAI.exportPDF()">PDF出力</button>
-        <button class="btn ghost mini" onclick="CareerAI.exportText('result')">テキスト出力</button>
       </div>
 
       <div id="result" class="doc placeholder">ここに生成された面接対策が表示されます。上のフォームを入力して「生成する」を押してください。出来上がったら、このまま編集できます。</div>
